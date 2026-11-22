@@ -10,6 +10,12 @@ import com.getcapacitor.BridgeActivity
 import com.getcapacitor.BridgeWebChromeClient
 
 class MainActivity : BridgeActivity() {
+    companion object {
+        @Volatile var visible = false
+            private set
+    }
+    override fun onStart() { super.onStart(); visible = true }
+    override fun onStop() { visible = false; super.onStop() }
     private var pending:PermissionRequest?=null
     private val microphone=registerForActivityResult(ActivityResultContracts.RequestPermission()){ allowed ->
         pending?.let { if(allowed) it.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else it.deny() }

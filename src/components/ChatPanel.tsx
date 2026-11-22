@@ -194,7 +194,7 @@ export default function ChatPanel({
     } catch (err: any) {
       cleanupRecorder();
       setMicPermissionError(
-        err?.message ||
+        err?.name === "NotAllowedError" ? "Allow microphone access in your device or site settings, then tap the microphone again." : err?.message ||
           "Could not access microphone. Please allow microphone permission to record voice notes."
       );
     }

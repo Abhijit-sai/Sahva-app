@@ -1655,7 +1655,7 @@ app.post("/api/chat/voice-note", async (req, res) => {
       }
     }
     for (const u of recipients)
-      sendUser(u.id, { type: "conversation:changed", roomId });
+      sendUser(u.id, { type: "conversation:changed", roomId, notifyMessage: u.id !== currentUser(res).id, messageId: message.id });
     res.json({ message });
   } catch (err: any) {
     const readable = formatReadableGeminiError(err);
@@ -1732,7 +1732,7 @@ app.post("/api/chat/send", async (req, res) => {
 
     if (room) broadcastRoom(room, { type: "chat:message", message });
     for (const u of recipients)
-      sendUser(u.id, { type: "conversation:changed", roomId });
+      sendUser(u.id, { type: "conversation:changed", roomId, notifyMessage: u.id !== currentUser(res).id, messageId: message.id });
     res.json({ message });
   } catch (err: any) {
     console.error("[Chat Send] Error:", err);

@@ -55,7 +55,9 @@ export const bridge = registerPlugin<{
   }): Promise<void>;
   stopActiveCallForegroundService(): Promise<void>;
   requestBatteryOptimizationExemption(): Promise<void>;
-  requestPermissions(): Promise<unknown>;
+  requestPermissions(options: { permissions: ["notifications"] }): Promise<unknown>;
+  getNotificationAccess(): Promise<{ status: "granted" | "prompt" | "denied" }>;
+  openNotificationSettings(): Promise<void>;
   consumePendingCallAction(): Promise<{
     action?: string;
     callSessionId?: string;

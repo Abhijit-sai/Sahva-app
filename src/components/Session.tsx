@@ -1,4 +1,5 @@
 import SahvaLogo from "./SahvaLogo";
+import { notificationAccess } from "../lib/notifications";
 import { useEffect, useState } from "react";
 import {
   HandleSSOCallback,
@@ -137,6 +138,7 @@ export default function Session() {
     if (!native || !me?.onboardingCompleted) return;
     let alive = true;
     const sync = async () => {
+      if ((await notificationAccess()) !== "granted") return;
       const authToken = await getToken();
       if (!authToken) return;
       const { grant } = await request("/api/native/listener-grant", "POST", {});
@@ -149,7 +151,10 @@ export default function Session() {
           grant,
         });
     };
-    sync().catch((e) => E(e.message));
+    const check = () => { if (!document.hidden) void sync().catch(() => {}); };
+    check();
+    window.addEventListener("sahva:alerts-enabled", check);
+    document.addEventListener("visibilitychange", check);
     const tick = setInterval(
       () =>
         getToken()
@@ -162,6 +167,8 @@ export default function Session() {
     return () => {
       alive = false;
       clearInterval(tick);
+      window.removeEventListener("sahva:alerts-enabled", check);
+      document.removeEventListener("visibilitychange", check);
     };
   }, [me?.id, me?.onboardingCompleted, getToken]);
   if (path === "/sso-callback")

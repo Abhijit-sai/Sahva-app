@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { App as NativeApp } from "@capacitor/app";
+import { showWebAlert } from "../lib/notifications";
 import { native, bridge, openSocket, request } from "../lib/runtimeConfig";
 interface Incoming {
   type: string;
@@ -40,6 +41,8 @@ export default function IncomingCalls({
     window.addEventListener("pointerdown", unlock);
     function message(e: any) {
       if (dead) return;
+      if (e.type === "conversation:changed" && e.notifyMessage)
+        void showWebAlert("New Sahva message", { body: "Open your workspace to read it.", tag: "chat-" + e.messageId }).catch(() => {});
       version++;
       if (e.type === "call:incoming" && Date.parse(e.expiresAt) > Date.now())
         I((old) =>
@@ -128,7 +131,7 @@ export default function IncomingCalls({
         I((old) => old.filter((r) => r.callSessionId !== active.callSessionId)),
       Math.max(0, Date.parse(active.expiresAt) - Date.now()),
     );
-    let notice: Notification | undefined,
+    let disposeNotice: (() => void) | undefined, ended = false,
       interval: ReturnType<typeof setInterval> | undefined;
     const oscillators = new Set<OscillatorNode>();
     if (!native) {
@@ -160,17 +163,17 @@ export default function IncomingCalls({
         "Notification" in window &&
         Notification.permission === "granted"
       ) {
-        notice = new Notification("Incoming Sahva call", {
+        void showWebAlert("Incoming Sahva call", {
           body: active.caller.name,
           tag: active.callSessionId,
-        });
-        notice.onclick = () => window.focus();
+        }).then(close => { if (ended) close?.(); else disposeNotice = close; }).catch(() => {});
       }
     }
     return () => {
       clearTimeout(expire);
       clearInterval(interval);
-      notice?.close();
+      ended = true;
+      disposeNotice?.();
       oscillators.forEach((o) => o.stop());
     };
   }, [active?.callSessionId]);

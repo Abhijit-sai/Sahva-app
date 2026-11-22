@@ -81,7 +81,6 @@ export async function authenticate(token: string) {
       displayName:
         [account.firstName, account.lastName].filter(Boolean).join(" ") ||
         primary.emailAddress.split("@")[0],
-      avatarUrl: account.imageUrl,
     })
     .onConflictDoUpdate({
       target: users.clerkUserId,

@@ -123,4 +123,41 @@ input[type="range"].mixer-slider::-webkit-slider-thumb:hover {
 .language-list {display:grid;gap:4px;max-height:32vh;overflow:auto}
 .photo img,.photo b {width:56px;height:56px;object-fit:cover;border-radius:50%;background:#e9f1ff;display:grid;place-items:center}
 .photo input {font-size:.8rem}
+.onboarding.entry {background:#fcfbf9;color:#0f172a}
+.entry-card.onboarding-card {width:min(100%,32rem);border-color:#e8e6e1;gap:17px}
+.setup-mast,.setup-identity,.setup-checklist li,.voice-card,.setup-greeting {display:flex;align-items:center;gap:12px}
+.setup-mast,.setup-greeting {justify-content:space-between}
+.setup-mast img {width:44px;height:44px;border:1px solid #e8e6e1;border-radius:50%}
+.setup-mast span,.setup-greeting small {font:500 .76rem "JetBrains Mono",monospace;color:#526071}
+.onboarding .step-indicator .filled {background:#1772b8}
+.onboarding h1 {font-size:clamp(1.8rem,5vw,2.35rem);line-height:1.08;outline:none}
+.setup-identity label {flex:1}
+.setup-identity > div {background:#eff6fc;color:#125c96}
+.setup-voices {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;min-width:0}
+.setup-voices legend {font-weight:600;margin-bottom:8px}
+.setup-voices label {position:relative;cursor:pointer}
+.setup-voices input {position:absolute;opacity:0;pointer-events:none}
+.voice-card {min-height:86px;padding:12px;gap:8px;border:1px solid #dbdfe4;border-radius:12px}
+.voice-card strong,.voice-card small {display:block}
+.voice-card small {font-size:.8rem;color:#526071}
+.voice-emoji {font-size:1.45rem}
+.voice-card svg {margin-left:auto;flex:none}
+.setup-voices input:checked + .voice-card {background:#eff6fc;color:#125c96;border-color:#a7cdeb}
+.setup-voices input:focus-visible + .voice-card {outline:2px solid #1772b8;outline-offset:2px}
+.setup-greeting {border-top:1px solid #e8e6e1;padding-top:12px}
+.setup-greeting span {font-size:1.35rem}
+.onboarding button:not(.secondary,.selected,.setup-link) {background:#1772b8}
+.onboarding .entry-actions button,.onboarding .setup-panel button {display:flex;align-items:center;justify-content:center;gap:8px;width:100%}
+.onboarding button.setup-link {background:transparent;color:#526071;padding:8px;font-size:.9rem}
+.setup-checklist {display:grid;gap:4px;list-style:none}
+.setup-checklist li {font-size:.94rem;padding:7px 10px;color:#526071}
+.setup-checklist li.current {background:#eff6fc;border-radius:8px;color:#125c96}
+.setup-checklist small {margin-left:auto;display:inline-flex;align-items:center;gap:4px}
+.setup-panel {display:grid;gap:12px;border-top:1px solid #e8e6e1;padding-top:20px}
+.setup-panel h2 {font-weight:700;font-size:1.3rem;letter-spacing:-.025em}
+.setup-panel meter {width:100%}
+.onboarding .setup-launch {min-height:50px;border-radius:14px}
+.alert-reminder {position:fixed;z-index:65;bottom:calc(76px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 24px);display:flex;gap:12px;background:white;color:#17263a;border:1px solid #dce5eb;border-radius:14px;padding:14px 18px;box-shadow:0 6px 25px #17263a20}
+.alert-reminder button {padding:6px 12px 3px 0;font-weight:600;color:#125c96}
+@media(max-width:390px){.voice-card{padding:10px 8px;gap:5px}.voice-emoji{font-size:1.2rem}}
 @media(max-width:520px){.entry{background:white}.entry-card{border:0;box-shadow:none;padding:16px}}

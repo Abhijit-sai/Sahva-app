@@ -30,7 +30,8 @@ class SahvaCallListenerService:Service() {
     }
     override fun onCreate(){
         super.onCreate()
-        nm.createNotificationChannel(NotificationChannel("sahva_ready","Background call listener",NotificationManager.IMPORTANCE_LOW).apply{setSound(null,null)})
+        nm.createNotificationChannel(NotificationChannel("sahva_ready","Call availability",NotificationManager.IMPORTANCE_LOW).apply{setSound(null,null)})
+        nm.createNotificationChannel(NotificationChannel("sahva_messages","Messages",NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel("sahva_incoming_calls","Incoming calls",NotificationManager.IMPORTANCE_HIGH).apply{setSound(null,null);enableVibration(false);lockscreenVisibility=Notification.VISIBILITY_PUBLIC})
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
@@ -58,6 +59,7 @@ class SahvaCallListenerService:Service() {
                         override fun onMessage(webSocket:WebSocket,text:String){handler.post{
                             if(ws===webSocket && !stopped)runCatching { val event=JSONObject(text)
                                 when(event.optString("type")){
+                                    "conversation:changed" -> if(event.optBoolean("notifyMessage") && !MainActivity.visible) messageAlert(event)
                                     "call:incoming"->ring(event)
                                     "call:cancelled","call:ended","call:declined","call:missed","call:answered_elsewhere"->if(currentId==event.optString("callSessionId"))clearRing()
                                 }
@@ -72,6 +74,15 @@ class SahvaCallListenerService:Service() {
         }
     }
     private fun lost(socket:WebSocket){handler.post{if(ws===socket){ws=null;schedule()}}}
+    private fun messageAlert(event: JSONObject) {
+        if (!nm.areNotificationsEnabled()) return
+        val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val notice = Notification.Builder(this, "sahva_messages")
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setContentTitle("New Sahva message").setContentText("Open your workspace to read it.")
+            .setCategory(Notification.CATEGORY_MESSAGE).setAutoCancel(true).setContentIntent(open).build()
+        nm.notify(event.optString("roomId"), 104, notice)
+    }
     private fun schedule(){if(!stopped){handler.removeCallbacks(reconnect);handler.postDelayed(reconnect,retry);retry=(retry*2).coerceAtMost(30000)}}
     private fun ring(event:JSONObject){
         val id=event.getString("callSessionId")

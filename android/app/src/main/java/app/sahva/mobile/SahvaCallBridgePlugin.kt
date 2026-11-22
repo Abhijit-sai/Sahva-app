@@ -15,6 +15,21 @@ import com.getcapacitor.annotation.Permission
     Permission(alias="notifications",strings=[Manifest.permission.POST_NOTIFICATIONS])
 ])
 class SahvaCallBridgePlugin : Plugin() {
+    @PluginMethod fun getNotificationAccess(call: PluginCall) {
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        val status = when {
+            manager.areNotificationsEnabled() -> "granted"
+            android.os.Build.VERSION.SDK_INT < 33 -> "denied"
+            getPermissionState("notifications") == PermissionState.DENIED -> "denied"
+            else -> "prompt"
+        }
+        call.resolve(JSObject().put("status", status))
+    }
+    @PluginMethod fun openNotificationSettings(call: PluginCall) {
+        activity.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+        call.resolve()
+    }
     @PluginMethod fun startCallListener(call: PluginCall) {
         val url = call.getString("wsUrl") ?: return call.reject("Missing signaling URL.")
         val uri = Uri.parse(url)

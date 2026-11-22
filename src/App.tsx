@@ -7,6 +7,7 @@ import {
   webOrigin,
 } from "./lib/runtimeConfig";
 import IncomingCalls from "./components/IncomingCalls";
+import NotificationReminder from "./components/NotificationReminder";
 import type { User as SahvaUser } from "./db/schema";
 import {
   useState,
@@ -209,6 +210,7 @@ export default function App({
     { id: string; name: string; language: string }[]
   >([]);
   const [notice, setNotice] = useState("");
+  const [offerAlerts, setOfferAlerts] = useState(false);
   const report = (e: Error) => setNotice(e.message);
   const loadWorkspace = useCallback(async () => {
     const [threads, notes, rows, logs]: [
@@ -745,6 +747,7 @@ export default function App({
         });
       audioEngineRef.current = engine;
       setInCall(true);
+      setOfferAlerts(true);
       setMuted(false);
 
       sendWs({
@@ -759,7 +762,9 @@ export default function App({
       stopLocalAudio();
       if(callSession.current)void request("/api/calls/"+callSession.current+"/join-failed","POST",{}).catch(report);
       accepted.current=false;callSession.current=null;
-      setNotice(err?.message || "Could not join call.");
+      setNotice(err?.name === "NotAllowedError"
+        ? "Allow microphone access in your device or site settings, then tap Call again."
+        : err?.message || "Could not join call.");
       setCallError(
         err?.message ||
           "Could not access microphone. Please allow microphone permission to join the live translated call.",
@@ -867,6 +872,7 @@ export default function App({
   // Send translated text message
   const handleSendChat = useCallback(
     async (text: string) => {
+      setOfferAlerts(true);
       const fallbackTargetLang = activeThread.isCustomRoom
         ? undefined
         : activeThread.partnerName.toLowerCase() === profile.name.toLowerCase()
@@ -913,6 +919,7 @@ export default function App({
   // Record & send translated voice note
   const handleSendVoiceNote = useCallback(
     async (blob: Blob, durationSeconds: number) => {
+      setOfferAlerts(true);
       setIsSendingVoiceNote(true);
       setVoiceNoteError(null);
       const fallbackTargetLang = activeThread.isCustomRoom
@@ -1782,6 +1789,7 @@ export default function App({
           {notice} <button onClick={() => setNotice("")}>Dismiss</button>
         </div>
       )}
+      {offerAlerts && !inCall && <NotificationReminder close={() => setOfferAlerts(false)} />}
       <IncomingCalls
         language={profile.language}
         onError={setNotice}

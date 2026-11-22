@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { SUPPORTED_LANGUAGES } from "../data/languages";
-import { bridge, native, request } from "../lib/runtimeConfig";
+import { request } from "../lib/runtimeConfig";
 import type { User } from "../db/schema";
+import Avatar from "./Avatar";
+import DeviceSetup from "./DeviceSetup";
+import { ArrowRight, Check } from "lucide-react";
+
 const greetings: Record<string, string> = {
   en: "Hello",
   te: "నమస్కారం",
@@ -42,263 +46,73 @@ const greetings: Record<string, string> = {
   uk: "Привіт",
   sw: "Habari",
 };
-export default function OnboardingFlow({
-  user,
-  done,
-}: {
-  user: User;
-  done: (u: User) => void;
-}) {
-  const [step, S] = useState(1),
-    [name, N] = useState(user.displayName),
-    [photo, P] = useState(user.avatarUrl),
-    [tone, T] = useState(user.voiceTone),
-    [lang, L] = useState("English"),
-    [search, Q] = useState(""),
-    [muted, M] = useState(false),
-    [level, V] = useState(0),
-    [busy, B] = useState(false),
-    [error, E] = useState("");
-  const stop = useRef(() => {}),
-    alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-      stop.current();
-    };
-  }, []);
-  const choice = SUPPORTED_LANGUAGES.find((l) => l.name === lang)!;
-  async function testMic() {
-    stop.current();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    if (!alive.current) {
-      stream.getTracks().forEach((t) => t.stop());
-      return;
-    }
-    const ctx = new AudioContext(),
-      meter = ctx.createAnalyser(),
-      source = ctx.createMediaStreamSource(stream);
-    source.connect(meter);
-    const data = new Uint8Array(meter.fftSize);
-    const tick = setInterval(() => {
-      meter.getByteTimeDomainData(data);
-      V(Math.min(100, Math.max(...data.map((v) => Math.abs(v - 128))) * 3));
-    }, 80);
-    const end = () => {
-      clearInterval(tick);
-      clearTimeout(timer);
-      stream.getTracks().forEach((t) => t.stop());
-      void ctx.close();
-      V(0);
-      stop.current = () => {};
-    };
-    const timer = setTimeout(end, 5000);
-    stop.current = end;
-  }
-  async function run(fn: () => Promise<unknown>) {
-    B(true);
-    E("");
-    try {
-      await fn();
-    } catch (e: any) {
-      E(e.message);
-    } finally {
-      B(false);
-    }
-  }
-  return (
-    <main className="entry">
-      <section className="entry-card">
-        <div className="step-indicator" aria-label={`Step ${step} of 3`}>
-          {[1, 2, 3].map((i) => (
-            <i key={i} className={i <= step ? "filled" : ""} />
-          ))}
-        </div>
-        <h1>{["Your profile", "Your language", "Set up calls"][step - 1]}</h1>
-        {step === 1 && (
-          <>
-            <label className="photo">
-              {photo ? (
-                <img src={photo} alt="Profile" />
-              ) : (
-                <b>{name.trim().slice(0, 1)}</b>
-              )}
-              <span>Choose photo</span>
-              <input
-                type="file"
-                accept="image/jpeg,image/png"
-                disabled={busy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f)
-                    void run(async () => {
-                      if (f.size > 5 * 1024 * 1024)
-                        throw Error("Choose a photo under 5 MB.");
-                      const data = await new Promise<string>((ok, no) => {
-                        const r = new FileReader();
-                        r.onload = () => ok(String(r.result).split(",")[1]);
-                        r.onerror = no;
-                        r.readAsDataURL(f);
-                      });
-                      P(
-                        (await request("/api/me/avatar", "POST", { data }))
-                          .avatarUrl,
-                      );
-                    });
-                }}
-              />
-            </label>
-            <label>
-              Display name
-              <input
-                value={name}
-                maxLength={80}
-                onChange={(e) => N(e.target.value)}
-              />
-            </label>
-            <label>
-              Voice tone
-              <select
-                value={tone}
-                onChange={(e) => T(e.target.value as typeof tone)}
-              >
-                <option value="female">Female — Kore</option>
-                <option value="male">Male — Charon</option>
-              </select>
-            </label>
-          </>
-        )}
-        {step === 2 && (
-          <>
-            <label>
-              Search languages
-              <input
-                type="search"
-                value={search}
-                onChange={(e) => Q(e.target.value)}
-              />
-            </label>
-            <div className="language-list">
-              {SUPPORTED_LANGUAGES.filter((l) =>
-                (l.name + l.nativeName + l.code)
-                  .toLowerCase()
-                  .includes(search.toLowerCase()),
-              ).map((l) => (
-                <button
-                  key={l.code}
-                  className={lang === l.name ? "selected" : "secondary"}
-                  onClick={() => L(l.name)}
-                >
-                  {l.name} · {l.nativeName}
-                </button>
-              ))}
-            </div>
-            <p>
-              {choice.code} · {greetings[choice.code]}
-            </p>
-          </>
-        )}
-        {step === 3 && (
-          <>
-            <label>
-              Audio mix
-              <select
-                value={muted ? "only" : "stack"}
-                onChange={(e) => M(e.target.value === "only")}
-              >
-                <option value="stack">100% / 15% Stack</option>
-                <option value="only">Translated Only</option>
-              </select>
-            </label>
-            <button
-              className="secondary"
-              disabled={busy}
-              onClick={() => run(testMic)}
-            >
-              Test microphone
-            </button>
-            <meter
-              min="0"
-              max="100"
-              value={level}
-              aria-label="Microphone level"
-            />
-            {native ? (
-              <>
-                <button
-                  className="secondary"
-                  onClick={() => run(() => bridge.requestPermissions())}
-                >
-                  Allow microphone and notifications
-                </button>
-                <button
-                  className="secondary"
-                  onClick={() =>
-                    run(() => bridge.requestBatteryOptimizationExemption())
-                  }
-                >
-                  Allow background listening
-                </button>
-                <p>Lets Sahva ring your phone even when minimized.</p>
-              </>
-            ) : (
-              "Notification" in window && (
-                <button
-                  className="secondary"
-                  onClick={() =>
-                    run(async () => {
-                      if (
-                        (await Notification.requestPermission()) !== "granted"
-                      )
-                        throw Error(
-                          "Enable notifications in your browser settings to receive call alerts.",
-                        );
-                    })
-                  }
-                >
-                  Enable call notifications
-                </button>
-              )
-            )}
-          </>
-        )}
-        {error && <p role="alert">{error}</p>}
-        <div className="entry-actions">
-          <button
-            disabled={busy || !name.trim()}
-            onClick={() =>
-              step < 3
-                ? S(step + 1)
-                : run(async () =>
-                    done(
-                      (
-                        await request("/api/me/onboarding", "PATCH", {
-                          displayName: name,
-                          preferredLanguageName: lang,
-                          voiceTone: tone,
-                          audioMixOriginalMuted: muted,
-                        })
-                      ).user,
-                    ),
-                  )
-            }
-          >
-            {step === 3 ? "Enter Sahva" : "Continue"}
-          </button>
-          {step > 1 && (
-            <button
-              className="secondary"
-              onClick={() => {
-                stop.current();
-                S(step - 1);
-              }}
-            >
-              Back
-            </button>
-          )}
-        </div>
-      </section>
-    </main>
+export default function OnboardingFlow({ user, done }: { user: User; done: (u: User) => void }) {
+  const [step, setStep] = useState(1);
+  const [name, setName] = useState(user.displayName);
+  const [tone, setTone] = useState(user.voiceTone);
+  const [language, setLanguage] = useState(
+    SUPPORTED_LANGUAGES.find(l => l.name === user.preferredLanguageName) || SUPPORTED_LANGUAGES[0],
   );
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus(); }, [step]);
+
+  async function finish() {
+    if (saving) return;
+    setSaving(true); setError("");
+    try {
+      const result = await request("/api/me/onboarding", "PATCH", {
+        displayName: name.trim(), preferredLanguageName: language.name, voiceTone: tone,
+      });
+      done(result.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t save your setup. Try again.");
+      setSaving(false);
+    }
+  }
+  const languages = SUPPORTED_LANGUAGES.filter(l =>
+    (l.name+" "+l.nativeName+" "+l.code).toLowerCase().includes(search.trim().toLowerCase()));
+  return <main className="entry onboarding">
+    <section className="entry-card onboarding-card">
+      <header className="setup-mast"><img src="/logo/Sahva_logo_mark_whitebg.svg" alt="Sahva"/><span>Step {step} of 3</span></header>
+      <div className="step-indicator" aria-hidden="true">
+        {[1,2,3].map(i => <i key={i} className={i <= step ? "filled" : ""}/>)}
+      </div>
+      <h1 ref={heading} tabIndex={-1}>{["Make yourself at home", "What language feels like home?", "Sound and notifications"][step-1]}</h1>
+      {step === 1 && <>
+        <p>Choose the name people will see and the voice they’ll hear in translation.</p>
+        <div className="setup-identity">
+          <Avatar name={name} size="lg" />
+          <label>Display name<input value={name} maxLength={80} onChange={e => setName(e.target.value)} /></label>
+        </div>
+        <fieldset className="setup-voices"><legend>Translation voice</legend>
+          {(["female","male"] as const).map(value => <label key={value}>
+            <input type="radio" name="voiceTone" value={value} checked={tone === value} onChange={() => setTone(value)}/>
+            <span className="voice-card">
+              <span className="voice-emoji" aria-hidden="true">{value === "female" ? "👩" : "👨"}</span>
+              <span><strong>{value === "female" ? "Female" : "Male"}</strong><small>{value === "female" ? "Kore" : "Charon"}</small></span>
+              {tone === value && <Check size={15} aria-hidden="true"/>}
+            </span>
+          </label>)}
+        </fieldset>
+      </>}
+      {step === 2 && <>
+        <p>Sahva will translate calls, messages, and meeting notes into this language.</p>
+        <label>Search languages<input type="search" value={search} onChange={e => setSearch(e.target.value)}/></label>
+        <div className="language-list">{languages.map(l =>
+          <button key={l.code} aria-pressed={language.code === l.code} className={language.code === l.code ? "selected" : "secondary"} onClick={() => setLanguage(l)}>{l.name} · {l.nativeName}</button>)}
+          {!languages.length && <p>No languages match your search.</p>}
+        </div>
+        <div className="setup-greeting"><span lang={language.code}>{greetings[language.code]}</span><small>{language.name} · {language.code}</small></div>
+      </>}
+      {step === 3 && <DeviceSetup finish={() => void finish()} busy={saving} name={name}/>}
+      {error && <p role="alert">{error}</p>}
+      <div className="entry-actions">
+        {step < 3 && <button disabled={!name.trim()} onClick={() => setStep(step+1)}>Continue <ArrowRight size={16}/></button>}
+        {step > 1 && <button className="setup-link" disabled={saving} onClick={() => {setError("");setStep(step-1);}}>Back</button>}
+      </div>
+    </section>
+  </main>;
 }
