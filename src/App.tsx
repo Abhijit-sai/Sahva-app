@@ -520,6 +520,7 @@ export default function App({
           }
 
           case "call:join_rejected": {
+            if (data.callId !== callSession.current) break;
             stopLocalAudio();
             callSession.current = null;
             accepted.current = false;
@@ -527,12 +528,17 @@ export default function App({
             break;
           }
           case "call:left_self": {
+            if (data.callId !== callSession.current) break;
+            callSession.current = null;
             stopLocalAudio();
             break;
           }
 
           case "call:ended": {
-            callSession.current=null;accepted.current=false;
+            // A delayed hangup can arrive while the caller is already redialing.
+            if (!callSession.current || data.callId !== callSession.current) break;
+            callSession.current = null;
+            accepted.current = false;
             stopLocalAudio();
             setCallPhase("idle");
             setCallerId(null);
@@ -1856,7 +1862,7 @@ export default function App({
             !e.partial &&
             ["call:declined", "call:cancelled", "call:missed"].includes(e.type)
           ) {
-            sendWs({ type: "call:leave" });
+            sendWs({ type: "call:leave", callSessionId: e.callSessionId });
             stopLocalAudio();
             callSession.current = null;
             setCallPhase("idle");

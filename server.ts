@@ -2176,6 +2176,7 @@ async function startServer() {
               )
                 return safeSend(ws, {
                   type: "call:join_rejected",
+                  callId: msg.callSessionId,
                   message: "Call is unavailable.",
                 });
               if (
@@ -2185,6 +2186,7 @@ async function startServer() {
               )
                 return safeSend(ws, {
                   type: "call:join_rejected",
+                  callId: msg.callSessionId,
                   message: "You joined this call on another device.",
                 });
               if (slot.inCall) return;
