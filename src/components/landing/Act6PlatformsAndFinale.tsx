@@ -213,7 +213,7 @@ export default function Act6PlatformsAndFinale({
           <BrandImage variant="mark" alt="" />
         </div>
         <h2>
-          100 Mn+ walls to break.
+          100 Mn walls to break.
           <br />
           One conversation at a time.
         </h2>
