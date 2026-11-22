@@ -1,0 +1,10 @@
+{
+  "name": "Live call translator",
+  "description": "Two-channel live call translation inside a messaging workspace with ducked original audio overlap and localized meeting notes.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

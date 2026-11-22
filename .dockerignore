@@ -1,0 +1,15 @@
+.git
+.aistudio
+.clerk
+.aws
+.codex
+.env*
+node_modules
+android
+dist
+dist-server
+*.pem
+*.jks
+*.keystore
+*.apk
+

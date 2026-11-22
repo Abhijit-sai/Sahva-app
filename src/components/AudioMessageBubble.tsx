@@ -1,0 +1,247 @@
+import { useState, useRef, useEffect } from "react";
+import { Play, Pause, FileText, Volume2 } from "lucide-react";
+import { areSameLanguage } from "../data/languages";
+import type { ChatMessage } from "../types";
+
+interface AudioMessageBubbleProps {
+  message: ChatMessage;
+  isSelf: boolean;
+  viewerLanguage: string;
+}
+
+function formatSeconds(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+function InlineClipPlayer({
+  src,
+  label,
+  fallbackDuration,
+  accent,
+}: {
+  src: string;
+  label: string;
+  fallbackDuration: number;
+  accent: "blue" | "slate";
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(fallbackDuration || 0);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+
+    const onLoaded = () => {
+      if (Number.isFinite(el.duration) && el.duration > 0) {
+        setDuration(el.duration);
+      }
+    };
+    const onTime = () => setCurrentTime(el.currentTime);
+    const onEnded = () => {
+      setPlaying(false);
+      setCurrentTime(0);
+    };
+    const onPause = () => setPlaying(false);
+    const onPlay = () => setPlaying(true);
+
+    el.addEventListener("loadedmetadata", onLoaded);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("ended", onEnded);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("play", onPlay);
+    return () => {
+      el.removeEventListener("loadedmetadata", onLoaded);
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("ended", onEnded);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("play", onPlay);
+    };
+  }, [src]);
+
+  const togglePlay = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) {
+      el.pause();
+    } else {
+      el.play().catch(() => {});
+    }
+  };
+
+  const progress =
+    duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+  return (
+    <div className="flex items-center gap-2.5 min-w-[215px] sm:min-w-[250px]">
+      <audio ref={audioRef} src={src} preload="metadata" />
+      <button
+        type="button"
+        onClick={togglePlay}
+        aria-label={playing ? `Pause ${label}` : `Play ${label}`}
+        className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors text-white ${
+          accent === "blue"
+            ? "bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500"
+            : "bg-slate-600 hover:bg-slate-700 dark:bg-slate-600 dark:hover:bg-slate-500"
+        }`}
+      >
+        {playing ? (
+          <Pause className="w-4 h-4 fill-current" />
+        ) : (
+          <Play className="w-4 h-4 fill-current ml-0.5" />
+        )}
+      </button>
+
+      <div className="flex-1 min-w-0 space-y-1.5">
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="font-medium truncate text-slate-800 dark:text-slate-100">
+            {label}
+          </span>
+          <span className="font-mono tabular-nums shrink-0 text-slate-500 dark:text-slate-400">
+            {formatSeconds(playing ? currentTime : duration)}
+          </span>
+        </div>
+        <div
+          onClick={(e) => {
+            const el = audioRef.current;
+            if (!el || !duration) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            const ratio = Math.max(
+              0,
+              Math.min(1, (e.clientX - rect.left) / rect.width)
+            );
+            el.currentTime = ratio * duration;
+            setCurrentTime(el.currentTime);
+          }}
+          className={`h-1.5 rounded-full overflow-hidden cursor-pointer ${
+            accent === "blue"
+              ? "bg-blue-200/80 dark:bg-blue-900/70"
+              : "bg-slate-200 dark:bg-slate-700"
+          }`}
+        >
+          <div
+            className={`h-full rounded-full transition-all duration-100 ${
+              accent === "blue"
+                ? "bg-blue-700 dark:bg-blue-400"
+                : "bg-slate-600 dark:bg-slate-300"
+            }`}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AudioMessageBubble({
+  message,
+  isSelf,
+  viewerLanguage,
+}: AudioMessageBubbleProps) {
+  const [showTranscription, setShowTranscription] = useState(false);
+  const [showOriginalAudio, setShowOriginalAudio] = useState(false);
+
+  const audio = message.audio;
+  if (!audio) return null;
+
+  const translatedText =
+    Object.entries(message.translations || {}).find(([lang]) =>
+      areSameLanguage(lang, viewerLanguage)
+    )?.[1] ||
+    Object.entries(message.translations || {}).find(([lang]) =>
+      areSameLanguage(lang, audio.translatedLanguage)
+    )?.[1] ||
+    message.originalText;
+
+  const accent: "blue" | "slate" = isSelf ? "slate" : "blue";
+
+  return (
+    <div className="space-y-1.5 text-left">
+      {/* Primary delivered audio: strictly the final translated voice file */}
+      <InlineClipPlayer
+        src={audio.translatedAudioUrl}
+        label={`Translated · ${audio.translatedLanguage}`}
+        fallbackDuration={audio.durationSeconds}
+        accent={accent}
+      />
+
+      {/* Compact side-by-side subtle faded micro-actions */}
+      <div className="flex items-center gap-3 pt-1 pl-[46px] text-[11px] leading-none text-slate-500 dark:text-slate-400">
+        <button
+          type="button"
+          aria-pressed={showTranscription}
+          onClick={() => setShowTranscription((v) => !v)}
+          className={`inline-flex items-center gap-1 py-1 transition-colors whitespace-nowrap ${
+            showTranscription
+              ? "text-blue-700 dark:text-blue-400 font-medium"
+              : "hover:text-slate-800 dark:hover:text-slate-200"
+          }`}
+        >
+          <FileText className="w-3 h-3 shrink-0" />
+          <span>Transcript</span>
+        </button>
+
+        <span
+          aria-hidden="true"
+          className="text-slate-300 dark:text-slate-700"
+        >
+          ·
+        </span>
+
+        <button
+          type="button"
+          aria-pressed={showOriginalAudio}
+          onClick={() => setShowOriginalAudio((v) => !v)}
+          className={`inline-flex items-center gap-1 py-1 transition-colors whitespace-nowrap ${
+            showOriginalAudio
+              ? "text-blue-700 dark:text-blue-400 font-medium"
+              : "hover:text-slate-800 dark:hover:text-slate-200"
+          }`}
+        >
+          <Volume2 className="w-3 h-3 shrink-0" />
+          <span>Original</span>
+        </button>
+      </div>
+
+      {/* Expandable Transcription Panel */}
+      {showTranscription && (
+        <div
+          className={`mt-1.5 p-2.5 rounded-lg text-xs space-y-1 leading-relaxed border ${
+            isSelf
+              ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+              : "bg-white/85 dark:bg-slate-900/80 border-blue-200/70 dark:border-blue-800/60 text-slate-800 dark:text-slate-200"
+          }`}
+        >
+          <p className="font-medium">{translatedText}</p>
+          {message.originalText && message.originalText !== translatedText && (
+            <p className="text-slate-500 dark:text-slate-400">
+              Original ({audio.originalLanguage}): {message.originalText}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Expandable Original Audio File Player */}
+      {showOriginalAudio && (
+        <div
+          className={`mt-1.5 p-2.5 rounded-lg border ${
+            isSelf
+              ? "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+              : "bg-white/85 dark:bg-slate-900/80 border-blue-200/70 dark:border-blue-800/60"
+          }`}
+        >
+          <InlineClipPlayer
+            src={audio.originalAudioUrl}
+            label={`Original · ${audio.originalLanguage}`}
+            fallbackDuration={audio.durationSeconds}
+            accent={accent}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
