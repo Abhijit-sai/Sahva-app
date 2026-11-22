@@ -1202,6 +1202,7 @@
 }
 .finale-emblem img {
   width: 51px;
+  border-radius: 50%;
 }
 .finale-emblem:before,
 .finale-emblem:after {

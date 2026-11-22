@@ -3,7 +3,7 @@ import type { ImgHTMLAttributes } from "react";
 const assets = {
   light: ["/brand/sahva-logo-light.png", "/logo/Sahva_logo_Whitebg.svg"],
   dark: ["/brand/sahva-logo-dark.png", "/logo/Sahva_logo_whitetext.svg"],
-  mark: ["/brand/sahva-mark.png", "/logo/Sahva_logo_mark.svg"],
+  mark: ["/logo/Sahva_logo_mark_whitebg.svg", "/logo/sahva-icon-180.png"],
 } as const;
 
 export default function BrandImage({
