@@ -13,6 +13,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import Avatar from "./Avatar";
+import { DEFAULT_CALL_MIX } from "../types";
 import { SUPPORTED_LANGUAGES } from "../data/languages";
 import type {
   AudioMixSettings,
@@ -377,6 +378,7 @@ export default function ProfileView({
                         onUpdateMix({
                           ...mixSettings,
                           muteOriginal: !mixSettings.muteOriginal,
+                          duckLevel: mixSettings.duckLevel || DEFAULT_CALL_MIX.duckLevel,
                         })
                       }
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition-colors shrink-0"

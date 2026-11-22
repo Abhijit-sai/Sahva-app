@@ -39,6 +39,7 @@ import TaskListView from "./components/TaskListView";
 import ProfileView from "./components/ProfileView";
 import { useReadReceipts } from "./lib/useReadReceipts";
 import { ringback } from "./lib/alertSounds";
+import { DEFAULT_CALL_MIX } from "./types";
 import {
   CallAudioEngine,
   type AudioMeterLevels,
@@ -63,14 +64,6 @@ import type {
 
 type ConversationSubTab = "chat" | "notes";
 type MobilePane = "list" | "thread";
-
-const DEFAULT_MIX: AudioMixSettings = {
-  autoDuck: false,
-  duckLevel: 0.15,
-  originalIdleLevel: 0.45,
-  translatedVolume: 1.0,
-  muteOriginal: false,
-};
 
 const STORAGE_THEME_KEY = "sahva:theme:v1";
 
@@ -146,7 +139,7 @@ export default function App({
     translationModel: user.audioModelPreference,
   });
   const [mixSettings, setMixSettings] = useState({
-    ...DEFAULT_MIX,
+    ...DEFAULT_CALL_MIX,
     duckLevel: user.audioMixDuckLevel,
     translatedVolume: user.audioMixTranslatedGain,
     muteOriginal: user.audioMixOriginalMuted,

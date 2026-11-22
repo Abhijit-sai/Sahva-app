@@ -1,4 +1,4 @@
-import type { AudioMixSettings } from "../types";
+import { DEFAULT_CALL_MIX, type AudioMixSettings } from "../types";
 
 export interface AudioMeterLevels {
   micLevel: number;
@@ -75,7 +75,7 @@ function computeRms(samples: Float32Array): number {
  * 1. Outbound mic capture (16kHz PCM) — NEVER routed to local speakers (zero self-echo).
  * 2. Inbound dual-track stacked playback mixer (24kHz AudioContext):
  *    - Track 1: Translated voice (24kHz PCM, default 100% gain)
- *    - Track 2: Partner's original voice bed (16kHz PCM, default 10% gain stacked underneath)
+ *    - Track 2: Partner's original voice (16kHz PCM, muted until enabled)
  */
 export class CallAudioEngine {
   private captureCtx: AudioContext | null = null;
@@ -100,13 +100,7 @@ export class CallAudioEngine {
   private muted = false;
   private micRms = 0;
 
-  private mix: AudioMixSettings = {
-    autoDuck: false, // Locked stacked mode: original voice stays softly at 15% under 100% translated voice
-    duckLevel: 0.15,
-    originalIdleLevel: 0.45,
-    translatedVolume: 1.0,
-    muteOriginal: false,
-  };
+  private mix = DEFAULT_CALL_MIX;
 
   private meterRafId: number | null = null;
   private onMicChunk: ((pcm16kBase64: string, rms: number) => void) | null = null;
@@ -147,6 +141,7 @@ export class CallAudioEngine {
       });
 
       this.originalGain = this.playbackCtx.createGain();
+      this.originalGain.gain.value = 0;
       this.translatedGain = this.playbackCtx.createGain();
       this.originalAnalyser = this.playbackCtx.createAnalyser();
       this.translatedAnalyser = this.playbackCtx.createAnalyser();
@@ -240,7 +235,7 @@ export class CallAudioEngine {
   }
 
   /**
-   * Play incoming partner original voice on Track 2 (16kHz PCM) at stacked ducked gain (default 10%).
+   * Play incoming partner original voice through the listener's Track 2 gain.
    */
   public enqueuePartnerOriginalAudio(pcm16kBase64: string) {
     if (!this.playbackCtx || !this.originalGain) return;
@@ -280,8 +275,7 @@ export class CallAudioEngine {
   }
 
   /**
-   * Play incoming partner translated voice on Track 1 (24kHz PCM) at full 100% volume,
-   * automatically holding Track 2 (original voice) at the ducked level (default 10%).
+   * Play the partner's translation on Track 1 at the selected translated volume.
    */
   public enqueuePartnerTranslatedAudio(pcm24kBase64: string) {
     if (!this.playbackCtx || !this.translatedGain) return;
@@ -338,10 +332,7 @@ export class CallAudioEngine {
       return;
     }
 
-    // In default stacked mode (autoDuck = false), original voice stays steadily at duckLevel (10%)
-    // so both parallel tracks feel balanced and crisp without volume pumping.
-    // In dynamic radio-duck mode (autoDuck = true), original voice swells up when translation pauses
-    // and smoothly ducks down to duckLevel (10%) whenever translated audio plays.
+    // With ducking enabled, restore the idle level during pauses in translation.
     const targetOriginalGain = !this.mix.autoDuck
       ? this.mix.duckLevel
       : hasActiveTranslation

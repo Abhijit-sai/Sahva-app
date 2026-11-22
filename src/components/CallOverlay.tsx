@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import Avatar from "./Avatar";
+import { DEFAULT_CALL_MIX } from "../types";
 import AudioTrackMeter from "./AudioTrackMeter";
 import { areSameLanguage } from "../data/languages";
 import type { AudioMeterLevels } from "../services/callAudioEngine";
@@ -681,6 +682,7 @@ export default function CallOverlay({
                     onUpdateMix({
                       ...mixSettings,
                       muteOriginal: !mixSettings.muteOriginal,
+                      duckLevel: mixSettings.duckLevel || DEFAULT_CALL_MIX.duckLevel,
                     })
                   }
                   className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-md"

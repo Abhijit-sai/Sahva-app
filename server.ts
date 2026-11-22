@@ -2343,7 +2343,7 @@ async function startServer() {
                 }, 650);
               }
 
-              // 1. Forward raw original 16kHz PCM STRICTLY to ALL OTHER in-call participants (15% voice bed)
+              // Each listener's mixer controls playback of the original track.
               for (const listener of room.participants.values()) {
                 if (
                   listener.id !== slot!.id &&

@@ -69,7 +69,7 @@ export const users = pgTable("users", {
     .default(1)
     .notNull(),
   audioMixOriginalMuted: boolean("audio_mix_original_muted")
-    .default(false)
+    .default(true)
     .notNull(),
   theme: theme().default("light").notNull(),
   onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),

@@ -195,6 +195,14 @@ export interface AudioMixSettings {
   muteOriginal: boolean;
 }
 
+export const DEFAULT_CALL_MIX: AudioMixSettings = {
+  autoDuck: false,
+  duckLevel: 0.15, // Starting level when a listener enables the original voice.
+  originalIdleLevel: 0.45,
+  translatedVolume: 1,
+  muteOriginal: true,
+};
+
 export interface UserProfileSettings {
   name: string;
   email: string;
