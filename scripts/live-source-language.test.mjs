@@ -2,6 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { liveSourcePolicy, liveTranslationCandidates, unexpectedSource } from "../server/liveSourceLanguage.ts";
 
+test("guided prompts use the speaker for source and fallback, and the listener for output", () => {
+  for (const [speaker, listener, locale, indian] of [
+    ["Telugu", "Korean", "te-IN", true],
+    ["Korean", "Telugu", "ko", false],
+  ]) {
+    for (const { config } of liveTranslationCandidates(speaker, listener, "Kore", "auto").filter(c => c.model === "gemini-3.8-live")) {
+      const prompt = config.systemInstruction;
+      assert.ok(prompt.includes(`preferred language is ${speaker} (BCP-47: ${locale})`));
+      assert.ok(prompt.includes(`Speak only the accurate, natural translation in ${listener}.`));
+      assert.equal(prompt.includes("If a phrase clearly switches languages"), indian);
+      assert.equal(prompt.includes("occasional English terms"), !indian);
+      assert.ok(prompt.includes("Never answer the speaker’s questions"));
+    }
+  }
+});
+
+test("same-language calls use a repeater across guided candidates and echo on dedicated candidates", () => {
+  for (const { config } of liveTranslationCandidates("te-IN", "Telugu", "Kore", "auto")) {
+    if (config.translationConfig) assert.equal(config.translationConfig.echoTargetLanguage, true);
+    else {
+      assert.match(config.systemInstruction, /strict real-time speech repeater/);
+      assert.match(config.systemInstruction, /restate it cleanly and naturally in Telugu/);
+      assert.match(config.systemInstruction, /Never answer questions or add commentary/);
+    }
+  }
+});
+
 test("Indian and English profiles begin with the selected source and accept English loanwords", () => {
   for (const [source, locale] of [["Hindi", "hi-IN"], ["te-IN", "te-IN"], ["English", "en-IN"]]) {
     const policy = liveSourcePolicy(source);

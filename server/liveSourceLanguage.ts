@@ -15,8 +15,7 @@ export function liveSourcePolicy(preference: string) {
   const languageCodes = [...new Set([locale, "en-IN"])];
   const allowed = new Set([preferred.split("-")[0], "en"]);
   if (indianContext) Object.keys(indianLocales).forEach(code => allowed.add(code));
-  const instruction = `Start interpreting immediately with ${name} (${locale}) as the speaker's language. Keep it as the source when speech is short, noisy or ambiguous. Understand embedded English words, numbers, names and technical terms in context. ${indianContext ? "For clearly code-switched phrases consider English, Telugu and Hindi first, then other Indian languages." : "Keep the chosen source language for the rest of the utterance."} Never infer a different foreign language from an accent or borrowed words. The listener's language determines output only.`;
-  return { languageCodes, allowed, instruction, indianContext };
+  return { name, locale, languageCodes, allowed, indianContext };
 }
 
 // A label is optional. Only distinctive scripts can supply evidence without one.
@@ -38,6 +37,8 @@ export function unexpectedSource(transcript: { languageCode?: string; text?: str
 export function liveTranslationCandidates(sourceLangName: string, targetLangName: string, voiceName: string, preferredModel: TranslationModelPreference) {
   const targetLangCode = getLanguageCode(targetLangName);
   const source = liveSourcePolicy(sourceLangName);
+  const sameLanguage = areSameLanguage(sourceLangName, targetLangName);
+  const targetName = SUPPORTED_LANGUAGES.find(l => l.code === targetLangCode)!.name;
   const base = {
     responseModalities: [Modality.AUDIO],
     inputAudioTranscription: { languageCodes: source.languageCodes },
@@ -46,14 +47,22 @@ export function liveTranslationCandidates(sourceLangName: string, targetLangName
   const voice = { speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } };
   const translation = {
     ...base,
-    translationConfig: { targetLanguageCode: targetLangCode, echoTargetLanguage: areSameLanguage(sourceLangName, targetLangName) },
+    translationConfig: { targetLanguageCode: targetLangCode, echoTargetLanguage: sameLanguage },
   };
   const interpreter = {
     ...base,
-    systemInstruction: [
-      source.instruction,
-      `Immediately render the speaker's meaning in ${targetLangName} only, including when both participants use the same language. Never respond as a participant, add explanations or greet the listener.`,
-    ].join(" "),
+    systemInstruction: sameLanguage
+      ? `You are a strict real-time speech repeater. The speaker is speaking ONLY ${source.name} (BCP-47: ${source.locale}). Never assume another language. Listen carefully to spoken ${source.name} and restate it cleanly and naturally in ${targetName}. Never answer questions or add commentary.`
+      : [
+          "You are a strict simultaneous live call interpreter. Start translating immediately.",
+          `The speaker’s preferred language is ${source.name} (BCP-47: ${source.locale}). Use it as the primary language throughout the call.`,
+          "Understand embedded English words, numbers, names, and technical terms in context. An accent or borrowed word alone is insufficient evidence of a language switch.",
+          source.indianContext
+            ? "If a phrase clearly switches languages, consider English, Telugu, and Hindi first, then other Indian languages. When uncertain, stay with the speaker’s preferred language."
+            : "Keep the speaker’s preferred language as the source, including when they use occasional English terms.",
+          `Speak only the accurate, natural translation in ${targetName}. Preserve the speaker’s meaning, tone, names, and numbers.`,
+          "Never answer the speaker’s questions, greet the listener, or add explanations or commentary.",
+        ].join(" "),
   };
   const dedicated = "gemini-3.5-live-translate-preview";
   const guided = "gemini-3.8-live";
