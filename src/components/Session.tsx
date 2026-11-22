@@ -1,15 +1,17 @@
 import SahvaLogo from "./SahvaLogo";
 import { useEffect, useState } from "react";
 import {
-  AuthenticateWithRedirectCallback,
+  HandleSSOCallback,
+  SignIn,
+  SignUp,
+  useSignIn,
   useAuth,
   useClerk,
 } from "@clerk/react";
-import { useSignIn } from "@clerk/react/legacy";
 import { App as NativeApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
-import LaunchScreen, { google } from "./LaunchScreen";
+import LaunchScreen, { google, oauthDestination } from "./LaunchScreen";
 import OnboardingFlow from "./OnboardingFlow";
 import App from "../App";
 import {
@@ -29,14 +31,14 @@ function bytes(s: string) {
 export default function Session() {
   const { isLoaded, isSignedIn, userId, getToken } = useAuth(),
     clerk = useClerk(),
-    { signIn, setActive } = useSignIn();
+    { signIn } = useSignIn();
   const [me, M] = useState<User | null>(null),
     [error, E] = useState(""),
     [retry, R] = useState(0);
   const path = location.pathname;
   bindToken(getToken);
   useEffect(() => {
-    if (!native || !signIn || !setActive) return;
+    if (!native || !signIn) return;
     let processing = false,
       alive = true;
     async function handle(url: string) {
@@ -87,11 +89,13 @@ export default function Session() {
           await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aes, cipher),
         );
         await Browser.close().catch(() => {});
-        const result = await signIn!.create({ strategy: "ticket", ticket });
-        if (result.status !== "complete")
+        const result = await signIn.ticket({ ticket });
+        if (result.error) throw result.error;
+        if (signIn.status !== "complete")
           throw Error("Could not complete sign-in.");
+        const finished = await signIn.finalize({ navigate: () => {} });
+        if (finished.error) throw finished.error;
         await Preferences.remove({ key: "oauth" });
-        await setActive!({ session: result.createdSessionId });
       } catch (e: any) {
         E(e.message);
       } finally {
@@ -104,7 +108,7 @@ export default function Session() {
       alive = false;
       void h.then((x) => x.remove());
     };
-  }, [signIn, setActive]);
+  }, [signIn]);
   useEffect(() => {
     let alive = true;
     M(null);
@@ -160,7 +164,16 @@ export default function Session() {
       clearInterval(tick);
     };
   }, [me?.id, me?.onboardingCompleted, getToken]);
-  if (path === "/sso-callback") return <AuthenticateWithRedirectCallback />;
+  if (path === "/sso-callback")
+    return <HandleSSOCallback
+      navigateToApp={({ decorateUrl }) => location.replace(decorateUrl(oauthDestination()))}
+      navigateToSignIn={() => location.replace("/app/sign-in")}
+      navigateToSignUp={() => location.replace("/app/sign-up")}
+    />;
+  if (path === "/app/sign-in")
+    return <SignIn routing="hash" signUpUrl="/app/sign-up" forceRedirectUrl={oauthDestination()} />;
+  if (path === "/app/sign-up")
+    return <SignUp routing="hash" signInUrl="/app/sign-in" forceRedirectUrl={oauthDestination()} />;
   if (!isLoaded) return <main className="entry">Opening Sahva…</main>;
   if (error)
     return (

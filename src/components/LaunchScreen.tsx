@@ -1,20 +1,30 @@
 import { useState, type FormEvent } from "react";
-import { useSignIn, useSignUp } from "@clerk/react/legacy";
+import { useSignIn, useSignUp } from "@clerk/react";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
 import { native, webOrigin } from "../lib/runtimeConfig";
 import SahvaLogo from "./SahvaLogo";
 
+export function oauthDestination() {
+  const saved = sessionStorage.getItem("sahva:oauthReturn");
+  if (saved?.startsWith("/native-login?") || saved?.startsWith("/join/"))
+    return saved;
+  return "/app";
+}
+
 export async function google(signIn: ReturnType<typeof useSignIn>["signIn"]) {
   if (!signIn) return;
   if (!native) {
-    await signIn.authenticateWithRedirect({
+    if (location.pathname.startsWith("/join/"))
+      sessionStorage.setItem("sahva:oauthReturn", location.pathname);
+    else if (location.pathname !== "/native-login")
+      sessionStorage.removeItem("sahva:oauthReturn");
+    const { error } = await signIn.sso({
       strategy: "oauth_google",
-      redirectUrl: "/sso-callback",
-      redirectUrlComplete:
-        sessionStorage.getItem("sahva:oauthReturn") ||
-        (location.pathname.startsWith("/join/") ? location.pathname : "/app"),
+      redirectCallbackUrl: "/sso-callback",
+      redirectUrl: oauthDestination(),
     });
+    if (error) throw Error(error.longMessage || error.message);
     return;
   }
   const keys = await crypto.subtle.generateKey(
@@ -45,12 +55,11 @@ export async function google(signIn: ReturnType<typeof useSignIn>["signIn"]) {
   await Browser.open({ url: url.href });
 }
 export default function LaunchScreen() {
-  const { signIn, setActive } = useSignIn(),
+  const { signIn } = useSignIn(),
     { signUp } = useSignUp();
   const [step, setStep] = useState<"welcome" | "email" | "code">("welcome"),
     [email, setEmail] = useState(""),
     [code, setCode] = useState(""),
-    [signup, setSignup] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   async function submit(e: FormEvent) {
@@ -60,37 +69,26 @@ export default function LaunchScreen() {
     setError("");
     try {
       if (step === "code") {
-        const result = signup
-          ? await signUp.attemptEmailAddressVerification({ code })
-          : await signIn.attemptFirstFactor({ strategy: "email_code", code });
-        if (result.status !== "complete")
-          throw Error("Your account needs further verification.");
-        await setActive({ session: result.createdSessionId });
+        const verified = await signIn.emailCode.verifyCode({ code });
+        let attempt: typeof signIn | typeof signUp = signIn;
+        if (verified.error?.code === "sign_up_if_missing_transfer") {
+          const created = await signUp.create({ transfer: true });
+          if (created.error) throw created.error;
+          attempt = signUp;
+        } else if (verified.error) throw verified.error;
+        if (attempt.status !== "complete") throw Error("Please complete account verification and try again.");
+        const finished = await attempt.finalize({ navigate: () => {} });
+        if (finished.error) throw finished.error;
         return;
       }
-      try {
-        const attempt = await signIn.create({ identifier: email });
-        const factor = attempt.supportedFirstFactors?.find(
-          (f) => f.strategy === "email_code",
-        );
-        if (factor?.strategy !== "email_code")
-          throw Error("Email codes are unavailable for this account.");
-        await attempt.prepareFirstFactor({
-          strategy: "email_code",
-          emailAddressId: factor.emailAddressId,
-        });
-        setSignup(false);
-      } catch (e: any) {
-        if (e.errors?.[0]?.code !== "form_identifier_not_found") throw e;
-        await signUp.create({ emailAddress: email });
-        await signUp.prepareEmailAddressVerification({
-          strategy: "email_code",
-        });
-        setSignup(true);
-      }
+      const started = await signIn.create({ identifier: email.trim(), signUpIfMissing: true });
+      if (started.error) throw started.error;
+      const sent = await signIn.emailCode.sendCode();
+      if (sent.error) throw sent.error;
+      setCode("");
       setStep("code");
     } catch (e: any) {
-      setError(e.errors?.[0]?.longMessage || e.message);
+      setError(e.longMessage || e.message || "Sign-in could not be completed. Try again.");
     } finally {
       setBusy(false);
     }
