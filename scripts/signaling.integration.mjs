@@ -127,6 +127,22 @@ test("PostgreSQL-backed call lifecycle and multiple authenticated devices", asyn
       null,
       404,
     );
+    const directory = await api("/users", a);
+    assert.ok(directory.people.some(person => person.id === b.id));
+    assert.ok(!directory.people.some(person => person.id === a.id));
+    const send = text => api("/chat/send", a, { roomId: room.roomKey, text, sourceLanguage: "English" });
+    const firstMessage = (await send("Hello there")).message;
+    const secondMessage = (await send("One more thing")).message;
+    const unread = async actor => (await api("/conversations", actor)).find(r => r.id === room.id).unreadCount;
+    assert.equal(await unread(a), 0);
+    assert.equal(await unread(b), 2);
+    const read = (actor, through, status) => api("/conversations/" + room.roomKey + "/read", actor, { through }, status);
+    await read(outsider, secondMessage.id, 404);
+    await read(b, firstMessage.id);
+    await read(b, firstMessage.id);
+    assert.equal(await unread(b), 1);
+    await read(b, secondMessage.id);
+    assert.equal(await unread(b), 0);
     const ring = async (extra = {}) =>
       api(
         "/calls/ring",

@@ -15,6 +15,39 @@ import com.getcapacitor.annotation.Permission
     Permission(alias="notifications",strings=[Manifest.permission.POST_NOTIFICATIONS])
 ])
 class SahvaCallBridgePlugin : Plugin() {
+    @PluginMethod fun presentIncoming(call: PluginCall) {
+        val event = call.getObject("event") ?: return call.reject("Missing call information.")
+        activity.runOnUiThread {
+            val service = SahvaCallListenerService.instance
+            try {
+                service?.ring(event)
+                call.resolve(JSObject().put("handled", service != null))
+            } catch (e: Exception) { call.reject("Could not present the call.", e) }
+        }
+    }
+    @PluginMethod fun dismissIncoming(call: PluginCall) {
+        activity.runOnUiThread {
+            SahvaCallListenerService.instance?.dismiss(call.getString("id"))
+            call.resolve()
+        }
+    }
+    @PluginMethod fun messageFeedback(call: PluginCall) {
+        val audio = requireNotNull(context.getSystemService(AudioManager::class.java))
+        val channel = context.getSystemService(android.app.NotificationManager::class.java)?.getNotificationChannel("sahva_messages")
+        if (channel?.importance == android.app.NotificationManager.IMPORTANCE_NONE || audio.ringerMode == AudioManager.RINGER_MODE_SILENT) {
+            call.resolve()
+            return
+        }
+        val attributes = android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION).build()
+        if (audio.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+            val uri = if (channel == null) android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION) else channel.sound
+            if (uri != null) android.media.RingtoneManager.getRingtone(context, uri)?.apply { audioAttributes = attributes; play() }
+        }
+        val vibrator = context.getSystemService(android.os.Vibrator::class.java)
+        if (channel == null || channel.shouldVibrate() || audio.ringerMode == AudioManager.RINGER_MODE_VIBRATE)
+            vibrator?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0,55,45,80), -1), attributes)
+        call.resolve()
+    }
     @PluginMethod fun getNotificationAccess(call: PluginCall) {
         val manager = context.getSystemService(android.app.NotificationManager::class.java)
         val status = when {

@@ -15,7 +15,6 @@ import {
 import Avatar from "./Avatar";
 import AudioMessageBubble from "./AudioMessageBubble";
 import { areSameLanguage } from "../data/languages";
-import { getAvatarForName } from "../data/conversations";
 import type {
   ChatMessage,
   MeetingNoteRecord,
@@ -30,6 +29,7 @@ interface ChatPanelProps {
   otherParticipants: ParticipantInfo[];
   fallbackPartnerName?: string;
   fallbackPartnerLanguage?: string;
+  photoFor: (id?: string) => string | undefined;
   selfAvatar: string;
   partnerAvatar: string;
   inviteUrl: string;
@@ -68,6 +68,7 @@ export default function ChatPanel({
   otherParticipants,
   fallbackPartnerName,
   fallbackPartnerLanguage,
+  photoFor,
   selfAvatar,
   partnerAvatar,
   inviteUrl,
@@ -371,8 +372,7 @@ export default function ChatPanel({
                 >
                   <Avatar
                     src={
-                      getAvatarForName(msg.senderName) ||
-                      (isSelf ? selfAvatar : undefined)
+                      isSelf ? selfAvatar : photoFor(msg.senderId)
                     }
                     name={msg.senderName}
                     size="sm"

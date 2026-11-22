@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { App as NativeApp } from "@capacitor/app";
+import { unlockAlerts, releaseAlerts, messagePing, incomingRingtone } from "../lib/alertSounds";
 import { showWebAlert } from "../lib/notifications";
 import { native, bridge, openSocket, request } from "../lib/runtimeConfig";
 interface Incoming {
@@ -25,24 +26,26 @@ export default function IncomingCalls({
   const active = incoming[0],
     handlers = useRef({ onAnswer, onEvent, onError });
   handlers.current = { onAnswer, onEvent, onError };
-  const ctx = useRef<AudioContext | null>(null);
+
   useEffect(() => {
     let dead = false,
       ws: WebSocket | undefined,
       timer: ReturnType<typeof setTimeout>,
       delay = 1000,
       version = 0;
-    const unlock = () => {
-      if (!native) {
-        ctx.current ??= new AudioContext();
-        void ctx.current.resume().catch(() => {});
-      }
-    };
-    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("pointerdown", unlockAlerts, true);
+    window.addEventListener("keydown", unlockAlerts, true);
+    if (navigator.userActivation?.hasBeenActive) unlockAlerts();
+    const seen = new Set<string>();
     function message(e: any) {
       if (dead) return;
-      if (e.type === "conversation:changed" && e.notifyMessage)
-        void showWebAlert("New Sahva message", { body: "Open your workspace to read it.", tag: "chat-" + e.messageId }).catch(() => {});
+      if (e.type === "conversation:changed" && e.notifyMessage && !seen.has(e.messageId)) {
+        seen.add(e.messageId);
+        if (seen.size > 256) seen.delete(seen.values().next().value!);
+        if (native && !document.hidden) void bridge.messageFeedback().catch(messagePing);
+        if (!native) messagePing();
+        void showWebAlert("New Sahva message", { body: e.senderName || "Open your workspace to read it.", tag: "chat-" + e.messageId }).catch(() => {});
+      }
       version++;
       if (e.type === "call:incoming" && Date.parse(e.expiresAt) > Date.now())
         I((old) =>
@@ -55,6 +58,7 @@ export default function IncomingCalls({
       handlers.current.onEvent(e);
     }
     async function sync() {
+      handlers.current.onEvent({ type: "user:sync" });
       const v = version;
       const rows: Incoming[] = await request("/api/calls/pending");
       if (dead) return;
@@ -116,12 +120,12 @@ export default function IncomingCalls({
       dead = true;
       clearTimeout(timer);
       ws?.close();
-      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("pointerdown", unlockAlerts, true);
+      window.removeEventListener("keydown", unlockAlerts, true);
       document.removeEventListener("visibilitychange", resume);
       void h?.then((x) => x.remove());
       void deep?.then((x) => x.remove());
-      void ctx.current?.close();
-      ctx.current = null;
+      releaseAlerts();
     };
   }, []);
   useEffect(() => {
@@ -132,32 +136,13 @@ export default function IncomingCalls({
       Math.max(0, Date.parse(active.expiresAt) - Date.now()),
     );
     let disposeNotice: (() => void) | undefined, ended = false,
-      interval: ReturnType<typeof setInterval> | undefined;
-    const oscillators = new Set<OscillatorNode>();
-    if (!native) {
-      const ring = () => {
-        const c = ctx.current;
-        if (!c || c.state !== "running") return;
-        for (const hz of [440, 480]) {
-          const o = c.createOscillator(),
-            g = c.createGain();
-          o.frequency.value = hz;
-          g.gain.setValueAtTime(0.001, c.currentTime);
-          g.gain.exponentialRampToValueAtTime(0.055, c.currentTime + 0.04);
-          g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.8);
-          o.connect(g).connect(c.destination);
-          o.start();
-          o.stop(c.currentTime + 0.82);
-          oscillators.add(o);
-          o.onended = () => {
-            oscillators.delete(o);
-            o.disconnect();
-            g.disconnect();
-          };
-        }
-      };
-      ring();
-      interval = setInterval(ring, 2300);
+      stopTone: (() => void) | undefined;
+    if (native) {
+      void bridge.presentIncoming({ event: active }).then(({ handled }) => {
+        if (!ended && !handled) stopTone = incomingRingtone();
+      }).catch(() => { if (!ended) stopTone = incomingRingtone(); });
+    } else {
+      stopTone = incomingRingtone();
       if (
         document.hidden &&
         "Notification" in window &&
@@ -171,10 +156,10 @@ export default function IncomingCalls({
     }
     return () => {
       clearTimeout(expire);
-      clearInterval(interval);
+      stopTone?.();
       ended = true;
       disposeNotice?.();
-      oscillators.forEach((o) => o.stop());
+      if (native) void bridge.dismissIncoming({ id: active.callSessionId }).catch(() => {});
     };
   }, [active?.callSessionId]);
   if (!active) return null;

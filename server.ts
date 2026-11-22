@@ -1655,7 +1655,7 @@ app.post("/api/chat/voice-note", async (req, res) => {
       }
     }
     for (const u of recipients)
-      sendUser(u.id, { type: "conversation:changed", roomId, notifyMessage: u.id !== currentUser(res).id, messageId: message.id });
+      sendUser(u.id, { type: "conversation:changed", roomId, notifyMessage: u.id !== currentUser(res).id, senderName: currentUser(res).displayName, messageId: message.id });
     res.json({ message });
   } catch (err: any) {
     const readable = formatReadableGeminiError(err);
@@ -1732,7 +1732,7 @@ app.post("/api/chat/send", async (req, res) => {
 
     if (room) broadcastRoom(room, { type: "chat:message", message });
     for (const u of recipients)
-      sendUser(u.id, { type: "conversation:changed", roomId, notifyMessage: u.id !== currentUser(res).id, messageId: message.id });
+      sendUser(u.id, { type: "conversation:changed", roomId, notifyMessage: u.id !== currentUser(res).id, senderName: currentUser(res).displayName, messageId: message.id });
     res.json({ message });
   } catch (err: any) {
     console.error("[Chat Send] Error:", err);
@@ -1909,7 +1909,13 @@ app.post(
         ),
       );
     if (!n) throw new HttpError(404, "Note unavailable.");
-    let key = n.recordingS3Key || n.ttsAudioS3Key;
+    let recording = n.recordingS3Key;
+    if (!recording && n.callSessionId) {
+      const [session] = await db.select({ key: calls.recordingS3Key }).from(calls)
+        .where(and(eq(calls.id, n.callSessionId), eq(calls.conversationId, n.conversationId)));
+      recording = session?.key || null;
+    }
+    let key = recording || n.ttsAudioS3Key;
     if (!key) {
       const wav = await synthesizeTranslatedVoiceNote(
         n.summary,
@@ -1928,7 +1934,7 @@ app.post(
     }
     res.json({
       recordingUrl: await mediaUrl(key),
-      source: n.recordingS3Key ? "call" : "summary_audio",
+      source: recording ? "call" : "summary_audio",
     });
   }),
 );
@@ -2169,7 +2175,7 @@ async function startServer() {
                 (room.callPhase !== "idle" && room.callId !== session.id)
               )
                 return safeSend(ws, {
-                  type: "call:error",
+                  type: "call:join_rejected",
                   message: "Call is unavailable.",
                 });
               if (
@@ -2178,7 +2184,7 @@ async function startServer() {
                 )
               )
                 return safeSend(ws, {
-                  type: "call:error",
+                  type: "call:join_rejected",
                   message: "You joined this call on another device.",
                 });
               if (slot.inCall) return;
@@ -2208,19 +2214,6 @@ async function startServer() {
                 // 2+ participants are in the call — activate / expand live multilingual translation!
                 const newlyActive = room.callPhase !== "active";
                 room.callPhase = "active";
-                if (!room.callId) {
-                  if (
-                    [...room.participants.values()].some(
-                      (p) => p !== slot && p.id === user.id && p.inCall,
-                    )
-                  )
-                    return safeSend(ws, {
-                      type: "call:error",
-                      message: "You joined this call on another device.",
-                    });
-                  if (slot.inCall) return;
-                  room.callId = session.id;
-                }
                 if (!room.callStartedAt || newlyActive) {
                   room.callStartedAt = new Date().toISOString();
                   room.callStartEpochMs = Date.now();
@@ -2232,17 +2225,6 @@ async function startServer() {
                 // Initiating call: enter waiting/ringing state until at least 1 other person joins
                 room.callPhase = "ringing";
                 room.callerId = slot!.id;
-                if (
-                  [...room.participants.values()].some(
-                    (p) => p !== slot && p.id === user.id && p.inCall,
-                  )
-                )
-                  return safeSend(ws, {
-                    type: "call:error",
-                    message: "You joined this call on another device.",
-                  });
-                if (slot.inCall) return;
-                room.callId = session.id;
                 room.callStartedAt = null;
                 room.callStartEpochMs = null;
                 room.recording = null;
@@ -2265,6 +2247,7 @@ async function startServer() {
             case "call:decline":
             case "call:end":
             case "call:leave": {
+              if (msg.callSessionId && msg.callSessionId !== room.callId) return;
               if (!slot!.inCall) return;
               const prevCallId = room.callId;
               const wasActive = room.callPhase === "active";

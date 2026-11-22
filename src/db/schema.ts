@@ -178,6 +178,12 @@ export const messages = pgTable(
   },
   (t) => [index().on(t.conversationId, t.createdAt)],
 );
+// Only new incoming chat messages acquire receipts. Existing history stays read.
+export const unreadMessages = pgTable("unread_messages", {
+  userId: userRef("user_id"),
+  messageId: uuid("message_id").notNull().references(() => messages.id, { onDelete: "cascade" }),
+  conversationId: conversationRef().notNull(),
+}, (t) => [uniqueIndex().on(t.userId, t.messageId), index().on(t.userId, t.conversationId)]);
 export const notes = pgTable(
   "meeting_notes",
   {

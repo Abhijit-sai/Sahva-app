@@ -22,7 +22,6 @@ import {
 import Avatar from "./Avatar";
 import AudioTrackMeter from "./AudioTrackMeter";
 import { areSameLanguage } from "../data/languages";
-import { getAvatarForName } from "../data/conversations";
 import type { AudioMeterLevels } from "../services/callAudioEngine";
 import type {
   AudioMixSettings,
@@ -44,6 +43,7 @@ interface CallOverlayProps {
   fallbackPartnerName?: string;
   fallbackPartnerLanguage?: string;
   fallbackPartnerLocation?: string;
+  photoFor: (id?: string) => string | undefined;
   selfAvatar: string;
   partnerAvatar: string;
   inCall: boolean;
@@ -95,6 +95,7 @@ export default function CallOverlay({
   fallbackPartnerName,
   fallbackPartnerLanguage,
   fallbackPartnerLocation,
+  photoFor,
   selfAvatar,
   partnerAvatar,
   inCall,
@@ -247,8 +248,7 @@ export default function CallOverlay({
       ? caller?.name || roomTitle
       : waitingDisplayName;
     const ringAvatarSrc =
-      getAvatarForName(ringAvatarName) ||
-      (isIncomingInvite ? selfAvatar : partnerAvatar);
+      isIncomingInvite ? photoFor(callerId || undefined) : partnerAvatar;
 
     return (
       <div
@@ -438,7 +438,7 @@ export default function CallOverlay({
         <div className="flex items-center gap-3 min-w-0">
           {otherCallParticipants.length === 1 ? (
             <Avatar
-              src={getAvatarForName(otherCallParticipants[0].name) || undefined}
+              src={photoFor(otherCallParticipants[0].id)}
               name={otherCallParticipants[0].name}
               size="sm"
             />
@@ -509,7 +509,7 @@ export default function CallOverlay({
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <Avatar
-                    src={getAvatarForName(person.name) || undefined}
+                    src={photoFor(person.id)}
                     name={person.name}
                     size="sm"
                   />

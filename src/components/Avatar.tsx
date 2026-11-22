@@ -26,9 +26,9 @@ export default function Avatar({
   size = "md",
   className = "",
 }: AvatarProps) {
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string>();
 
-  if (!src || failed) {
+  if (!src || failed === src) {
     return (
       <div
         aria-label={name}
@@ -44,7 +44,7 @@ export default function Avatar({
       src={src}
       alt={name}
       referrerPolicy="no-referrer"
-      onError={() => setFailed(true)}
+      onError={() => setFailed(src)}
       className={`${SIZE_MAP[size]} rounded-full object-cover shrink-0 bg-slate-200 dark:bg-slate-800 ${className}`}
     />
   );

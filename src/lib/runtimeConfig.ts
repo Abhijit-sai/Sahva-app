@@ -47,6 +47,9 @@ export const bridge = registerPlugin<{
     grant: string;
     language: string;
   }): Promise<void>;
+  messageFeedback(): Promise<void>;
+  presentIncoming(o: { event: object }): Promise<{handled: boolean}>;
+  dismissIncoming(o: { id: string }): Promise<void>;
   stopCallListener(): Promise<void>;
   refreshAuthToken(o: { authToken: string }): Promise<void>;
   startActiveCallForegroundService(o: {

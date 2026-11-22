@@ -198,7 +198,7 @@ export default function MeetingNotesView({
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-  }, [selectedNote?.id, selectedNote?.recordingUrl, selectedNote?.durationSeconds]);
+  }, [selectedNote?.id, selectedNote?.durationSeconds]);
 
   const desiredLanguage = viewLangOverride || preferredLanguage;
 
@@ -218,9 +218,9 @@ export default function MeetingNotesView({
     ? resolveLocalizedNote(selectedNote)
     : null;
 
-  const ensureAudioReady = async (): Promise<string | null> => {
+  const ensureAudioReady = async (refresh = false): Promise<string | null> => {
     if (!selectedNote) return null;
-    if (selectedNote.recordingUrl && !audioRef.current?.error) return selectedNote.recordingUrl;
+    if (!refresh && selectedNote.recordingUrl && !audioRef.current?.error) return selectedNote.recordingUrl;
     const spokenText = [
       activeLocalized?.title,
       activeLocalized?.summary,
@@ -228,7 +228,7 @@ export default function MeetingNotesView({
     ]
       .filter(Boolean)
       .join(". ");
-    if (!spokenText) return null;
+
 
     setIsPreparingAudio(true);
     setRecordingError(null);
@@ -257,29 +257,27 @@ export default function MeetingNotesView({
       return;
     }
 
+    const el = audioRef.current;
+    if (!el) return;
+    const play = async (url: string) => {
+      if (el !== audioRef.current) return;
+      if (el.src !== new URL(url, window.location.href).href) el.src = url;
+      await el.play();
+    };
     const url = await ensureAudioReady();
     if (!url) return;
-
-    // Wait a tick for <audio src={url}> to attach if it was just prepared
-    setTimeout(async () => {
-      const el = audioRef.current;
-      if (!el) return;
-      if (el.src !== new URL(url, window.location.origin).href) {
-        el.src = url;
-      }
-      try {
-        await el.play();
-        setIsPlayingRecording(true);
-      } catch {
-        setRecordingError("Playback could not start. Click Play again or Download.");
-        setIsPlayingRecording(false);
-      }
-    }, 60);
+    try {
+      await play(url);
+    } catch {
+      if (el !== audioRef.current) return;
+      const fresh = await ensureAudioReady(true);
+      if (fresh) await play(fresh).catch(() => setRecordingError("Could not play the recording. Try again."));
+    }
   };
 
   const handleDownloadRecording = async () => {
     if (!selectedNote || isPreparingAudio) return;
-    const url = await ensureAudioReady();
+    const url = await ensureAudioReady(true);
     if (!url) return;
     if(native){await bridge.downloadRecording({url}).catch(()=>setRecordingError("Could not download recording."));return}
     const a = document.createElement("a");
@@ -587,7 +585,10 @@ export default function MeetingNotesView({
 
             {/* Shared audio element for Call Recording / Audio Summary */}
             <audio
+              key={selectedNote.id}
               ref={audioRef}
+              onPlay={() => setIsPlayingRecording(true)}
+              onPause={() => setIsPlayingRecording(false)}
               src={selectedNote.recordingUrl || undefined}
               preload="metadata"
               onLoadedMetadata={(e) => {

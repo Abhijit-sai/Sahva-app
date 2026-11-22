@@ -1,9 +1,10 @@
-import { and, eq, inArray, desc } from "drizzle-orm";
+import { and, eq, inArray, desc, count, ne } from "drizzle-orm";
 import { db } from "../../src/db";
 import {
   users,
   conversations,
   participants,
+  unreadMessages,
   messages,
   notes,
   tasks,
@@ -46,6 +47,9 @@ export async function threadList(user: User) {
     .innerJoin(conversations, eq(conversations.id, participants.conversationId))
     .where(eq(participants.userId, user.id))
     .orderBy(desc(conversations.createdAt));
+  const counts = await db.select({ room: unreadMessages.conversationId, total: count() })
+    .from(unreadMessages).where(eq(unreadMessages.userId, user.id)).groupBy(unreadMessages.conversationId);
+  const unread = new Map(counts.map(row => [row.room, row.total]));
   return Promise.all(
     rows.map(async ({ room }) => {
       const others = (await members(room.id)).filter((u) => u.id !== user.id);
@@ -54,11 +58,12 @@ export async function threadList(user: User) {
         .select({ text: messages.originalText })
         .from(messages)
         .where(eq(messages.conversationId, room.id))
-        .orderBy(desc(messages.createdAt))
+        .orderBy(desc(messages.createdAt), desc(messages.id))
         .limit(1);
       return {
         id: room.id,
         roomId: room.roomKey,
+        unreadCount: unread.get(room.id) || 0,
         title: room.title || peer?.displayName || "Conversation",
         partnerRoleLabel: room.isGroup ? "Group" : "Contact",
         partnerLocation: "",
@@ -87,7 +92,7 @@ export async function history(
     .from(messages)
     .innerJoin(users, eq(users.id, messages.senderUserId))
     .where(eq(messages.conversationId, conversationId))
-    .orderBy(desc(messages.createdAt))
+    .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(200);
   const personalNotes = await db
     .select({ call: notes.callSessionId, id: notes.id })
@@ -173,6 +178,12 @@ export async function saveMessage(
         translatedAudioMapJson: translated,
         callSessionId: callId,
       });
+    if (m.kind !== "call_summary") {
+      const recipients = await tx.select({ userId: participants.userId }).from(participants)
+        .where(and(eq(participants.conversationId, conversationId), ne(participants.userId, userId)));
+      if (recipients.length) await tx.insert(unreadMessages).values(
+        recipients.map(({ userId }) => ({ userId, conversationId, messageId: m.id })));
+    }
     await tx
       .update(conversations)
       .set({ lastMessageAt: new Date() })
@@ -231,7 +242,7 @@ export async function noteList(
           completed: states[t.id] || false,
         })),
       };
-      const key = n.recordingS3Key || n.ttsAudioS3Key;
+      const key = n.recordingS3Key || call?.recordingS3Key || n.ttsAudioS3Key;
       return {
         id: n.id,
         roomId: room.roomKey,

@@ -78,6 +78,7 @@ export async function authenticate(token: string) {
     .values({
       clerkUserId: account.id,
       email: primary.emailAddress.toLowerCase(),
+      avatarUrl: account.hasImage ? account.imageUrl : null,
       displayName:
         [account.firstName, account.lastName].filter(Boolean).join(" ") ||
         primary.emailAddress.split("@")[0],

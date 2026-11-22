@@ -37,9 +37,8 @@ import CallOverlay from "./components/CallOverlay";
 import CallLogView from "./components/CallLogView";
 import TaskListView from "./components/TaskListView";
 import ProfileView from "./components/ProfileView";
-import {
-  getAvatarForName,
-} from "./data/conversations";
+import { useReadReceipts } from "./lib/useReadReceipts";
+import { ringback } from "./lib/alertSounds";
 import {
   CallAudioEngine,
   type AudioMeterLevels,
@@ -118,6 +117,7 @@ export default function App({
   // Conversations (Recent Chats + All Contacts + Custom Rooms)
   type Thread = ConversationThread & {
     id?: string;
+    unreadCount?: number;
     inviteToken?: string;
     targetUserIds?: string[];
   };
@@ -204,14 +204,25 @@ export default function App({
   const [reminders, setReminders] = useState<Record<string, TaskReminder>>({});
   const [archivedTaskKeys, setArchivedTaskKeys] = useState<string[]>([]);
   const taskIds = useRef<Record<string, string>>({});
+  const [queuedDial, setQueuedDial] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const attempt = useRef(0);
+  const callDialog = useRef<HTMLDialogElement>(null);
   const callSession = useRef<string | null>(null);
   const accepted = useRef(false);
   const [directory, setDirectory] = useState<
-    { id: string; name: string; language: string }[]
+    { id: string; name: string; language: string; avatarUrl?: string }[]
   >([]);
   const [notice, setNotice] = useState("");
   const [offerAlerts, setOfferAlerts] = useState(false);
   const report = (e: Error) => setNotice(e.message);
+  const threadRevision = useRef(0);
+  const refreshThreads = useCallback(async (): Promise<Thread[]> => {
+    const revision = ++threadRevision.current;
+    const rows = await request("/api/conversations");
+    if (revision === threadRevision.current) setConversations(rows);
+    return rows;
+  }, []);
   const loadWorkspace = useCallback(async () => {
     const [threads, notes, rows, logs]: [
       Thread[],
@@ -219,12 +230,11 @@ export default function App({
       any[],
       CallLogEntry[],
     ] = await Promise.all([
-      request("/api/conversations"),
+      refreshThreads(),
       request("/api/notes"),
       request("/api/tasks"),
       request("/api/call-log"),
     ]);
-    setConversations(threads);
     setActiveRoomId((old) =>
       threads.some((t) => t.roomId === old) ? old : threads[0]?.roomId || "",
     );
@@ -270,22 +280,33 @@ export default function App({
   }, [loadWorkspace]);
   useEffect(() => {
     let alive = true;
-    setDirectory([]);
+    async function loadDirectory() {
+      const people = [];
+      let cursor = "";
+      do {
+        const page = await request("/api/users" + (cursor ? "?after=" + encodeURIComponent(cursor) : ""));
+        if (!alive) return;
+        people.push(...page.people);
+        cursor = page.next;
+      } while (cursor);
+      setDirectory(people.sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    void loadDirectory().catch(report);
+    window.addEventListener("focus", loadDirectoryOnFocus);
+    function loadDirectoryOnFocus() { void loadDirectory().catch(report); }
+    return () => { alive = false; window.removeEventListener("focus", loadDirectoryOnFocus); };
+  }, [selfId]);
+  const [searchMatches, setSearchMatches] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    setSearchMatches([]);
     if (chatSearch.trim().length < 2) return;
-    const timer = setTimeout(
-      () =>
-        request("/api/users/search?q=" + encodeURIComponent(chatSearch))
-          .then((rows) => {
-            if (alive) setDirectory(rows);
-          })
-          .catch(report),
-      250,
-    );
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
+    const timer = setTimeout(() => void request("/api/users/search?q=" + encodeURIComponent(chatSearch))
+      .then(rows => { if (alive) setSearchMatches(rows.map((r: {id: string}) => r.id)); }).catch(report), 250);
+    return () => { alive = false; clearTimeout(timer); };
   }, [chatSearch]);
+  useReadReceipts(activeRoomId, selfId, messages, homeTab === "chats" && conversationTab === "chat" && !inCall && !waiting && !isJoiningCall && !showRoomModal,
+    mobilePane === "thread", activeThread.unreadCount || 0, refreshThreads);
   const changeTask = (key: string, patch: object) =>
     request("/api/tasks/" + taskIds.current[key], "PATCH", patch)
       .then(loadWorkspace)
@@ -358,6 +379,9 @@ export default function App({
       audioEngineRef.current.stop();
       audioEngineRef.current = null;
     }
+    ++attempt.current;
+    setWaiting(false);
+    setIsJoiningCall(false);
     setInCall(false);
     setMuted(false);
     setLevels({
@@ -469,6 +493,7 @@ export default function App({
             const snap: RoomSnapshot = data.snapshot;
             setIsCustomRoomServer(snap.isCustomRoom);
             setParticipants(snap.participants || []);
+            if (snap.callPhase === "active" && snap.callId === callSession.current) setWaiting(false);
             setCallPhase(snap.callPhase || "idle");
             setCallerId(snap.callerId || null);
             setCallStartedAt(snap.callStartedAt);
@@ -487,12 +512,20 @@ export default function App({
 
           case "room:presence": {
             setParticipants(data.participants || []);
+            if (data.callPhase === "active" && data.callId === callSession.current) setWaiting(false);
             setCallPhase(data.callPhase || "idle");
             setCallerId(data.callerId || null);
             setCallStartedAt(data.callStartedAt || null);
             break;
           }
 
+          case "call:join_rejected": {
+            stopLocalAudio();
+            callSession.current = null;
+            accepted.current = false;
+            setNotice(data.message || "Could not join this call.");
+            break;
+          }
           case "call:left_self": {
             stopLocalAudio();
             break;
@@ -716,13 +749,16 @@ export default function App({
   // Start / Accept Call
   const handleStartOrAcceptCall = useCallback(async () => {
     if (inCall || isJoiningCall) return;
+    setQueuedDial(false);
+    const ticket = ++attempt.current;
+    const engine = new CallAudioEngine();
+    setWaiting(true);
     setIsJoiningCall(true);
     setCallError(null);
 
     try {
       if (wsRef.current?.readyState !== WebSocket.OPEN)
         throw Error("Connecting to the conversation. Try again shortly.");
-      const engine = new CallAudioEngine();
       audioEngineRef.current = engine;
       engine.setMixSettings(mixSettingsRef.current);
       await engine.start(
@@ -733,10 +769,15 @@ export default function App({
         },
         (nextLevels) => setLevels(nextLevels),
       );
+      if (attempt.current !== ticket) { engine.stop(); return; }
       if (!accepted.current) {
         const ring = await request("/api/calls/ring", "POST", {
           conversationId: activeThreadRef.current.id,
         });
+        if (attempt.current !== ticket) {
+          await request("/api/calls/" + ring.callSessionId + "/cancel", "POST", {});
+          return;
+        }
         callSession.current = ring.callSessionId;
       }
       accepted.current = false;
@@ -745,6 +786,8 @@ export default function App({
           callerName: activeThreadRef.current.title,
           roomId: activeThreadRef.current.roomId,
         });
+      if (attempt.current !== ticket) { engine.stop(); return; }
+      if (wsRef.current?.readyState !== WebSocket.OPEN) throw Error("Connection lost while dialing.");
       audioEngineRef.current = engine;
       setInCall(true);
       setOfferAlerts(true);
@@ -759,6 +802,8 @@ export default function App({
         model: profileRef.current.translationModel,
       });
     } catch (err: any) {
+      engine.stop();
+      if (attempt.current !== ticket) return;
       stopLocalAudio();
       if(callSession.current)void request("/api/calls/"+callSession.current+"/join-failed","POST",{}).catch(report);
       accepted.current=false;callSession.current=null;
@@ -770,7 +815,7 @@ export default function App({
           "Could not access microphone. Please allow microphone permission to join the live translated call.",
       );
     } finally {
-      setIsJoiningCall(false);
+      if (attempt.current === ticket) setIsJoiningCall(false);
     }
   }, [inCall, isJoiningCall, sendWs, stopLocalAudio]);
 
@@ -832,22 +877,22 @@ export default function App({
 
   const handleEndCall = useCallback(async () => {
     const wasActive = callPhaseRef.current === "active";
-    stopLocalAudio();
-    sendWs({ type: "call:end" });
-
-    if (!wasActive && callSession.current)
-      await request(
-        "/api/calls/" + callSession.current + "/cancel",
-        "POST",
-        {},
-      ).catch(report);
+    autoStartCallRoomRef.current = null;
+    setQueuedDial(false);
+    const session = callSession.current;
     callSession.current = null;
+    accepted.current = false;
+    stopLocalAudio();
+    if (!wasActive && session) {
+      await request("/api/calls/" + session + "/cancel", "POST", {})
+        .catch(() => request("/api/calls/" + session + "/join-failed", "POST", {})).catch(report);
+    }
+    if (session && !callSession.current) sendWs({ type: "call:end", callSessionId: session });
     loadWorkspace().catch(report);
     promoteToRecent(activeRoomId);
   }, [
     activeRoomId,
-    callElapsedSeconds,
-    generateNotesForCall,
+    loadWorkspace,
     promoteToRecent,
     sendWs,
     stopLocalAudio,
@@ -1113,7 +1158,26 @@ export default function App({
   const inviteUrl = activeThread.inviteToken
     ? webOrigin + "/join/" + activeThread.inviteToken
     : "";
-  const showCallOverlay = inCall && callPhase !== "idle";
+  const dialing = queuedDial || waiting;
+  const showCallOverlay = dialing || inCall;
+  useEffect(() => {
+    if (!queuedDial) return;
+    const timeout = window.setTimeout(() => {
+      autoStartCallRoomRef.current = null;
+      setQueuedDial(false);
+      setNotice("Could not connect to the conversation. Please try again.");
+    }, 15000);
+    return () => clearTimeout(timeout);
+  }, [queuedDial]);
+  useEffect(() => {
+    if (showCallOverlay) callDialog.current?.showModal();
+  }, [showCallOverlay]);
+  useEffect(() => {
+    if (!waiting || !inCall) return;
+    const stop = ringback();
+    const timeout = window.setTimeout(() => void handleEndCall(), 55000);
+    return () => { stop(); clearTimeout(timeout); };
+  }, [waiting, inCall, handleEndCall]);
   // Filter chats for Search
   const q = chatSearch.trim().toLowerCase();
   const filteredThreads = conversations.filter((t) => {
@@ -1126,7 +1190,7 @@ export default function App({
   });
 
   const recentThreads = filteredThreads.filter((t) => t.isRecent);
-  const allContactThreads = filteredThreads.filter((t) => !t.isRecent);
+  const people = directory.filter(p => !q || (p.name + " " + p.language).toLowerCase().includes(q) || searchMatches.includes(p.id));
 
   const roomTitlesById: Record<string, string> = {};
   for (const c of conversations) {
@@ -1171,6 +1235,7 @@ export default function App({
     if (roomId === activeRoomId && wsConnected) {
       handleStartOrAcceptCall();
     } else {
+      setQueuedDial(true);
       autoStartCallRoomRef.current = roomId;
       setActiveRoomId(roomId);
     }
@@ -1229,6 +1294,7 @@ export default function App({
   })();
 
   const selfAvatar = user.avatarUrl || "";
+  const photoFor = (id?: string) => id === selfId ? selfAvatar : directory.find(person => person.id === id)?.avatarUrl;
   const selfFirstName = profile.name.trim().split(/\s+/)[0] || "Account";
 
   const isViewingAsPartner = false;
@@ -1250,7 +1316,7 @@ export default function App({
     icon: typeof MessageSquare;
     badge?: number;
   }> = [
-    { id: "chats", label: "Chats", icon: MessageSquare },
+    { id: "chats", label: "Chats", icon: MessageSquare, badge: conversations.reduce((n, t) => n + (t.unreadCount || 0), 0) },
     { id: "calls", label: "Calls", icon: Clock },
     { id: "list", label: "List", icon: CheckSquare, badge: openTaskCount },
     { id: "profile", label: selfFirstName, icon: User },
@@ -1310,15 +1376,6 @@ export default function App({
         </div>
 
         {/* Create New Multi-Participant Room Form */}
-        {directory.map((person) => (
-          <button
-            className="text-left w-full px-5 py-2 hover:bg-blue-50"
-            key={person.id}
-            onClick={() => createThread({ targetUserIds: [person.id] })}
-          >
-            {person.name} · {person.language}
-          </button>
-        ))}
         {showRoomModal && (
           <form
             onSubmit={handleCreateRoom}
@@ -1409,58 +1466,28 @@ export default function App({
                             }`}
                       </p>
                     </div>
+                    {!!thread.unreadCount && <span aria-label={thread.unreadCount + " unread messages"} className="shrink-0 rounded-full bg-[#125C96] px-2 min-w-6 h-6 grid place-items-center text-xs text-white font-semibold tabular-nums">{thread.unreadCount}</span>}
                   </button>
                 );
               })}
             </>
           )}
 
-          {recentThreads.length > 0 && allContactThreads.length > 0 && (
-            <div className="my-2.5 border-t border-slate-100 dark:border-slate-800" />
-          )}
-
-          {allContactThreads.length > 0 && (
-            <>
-              <p className="px-2 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                All Contacts
-              </p>
-              {allContactThreads.map((thread) => {
-                const isSelected =
-                  homeTab === "chats" && thread.roomId === activeRoomId;
-                return (
-                  <button
-                    key={thread.roomId}
-                    type="button"
-                    onClick={() => handleSelectThread(thread)}
-                    className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 transition-colors ${
-                      isSelected
-                        ? "bg-slate-100 dark:bg-slate-800/90"
-                        : "hover:bg-slate-50 dark:hover:bg-slate-800/40"
-                    }`}
-                  >
-                    <Avatar
-                      src={thread.partnerAvatar}
-                      name={thread.partnerName}
-                      size="md"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
-                        {thread.title}
-                      </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                        {thread.partnerLanguage}
-                        {thread.partnerLocation
-                          ? ` · ${thread.partnerLocation}`
-                          : ""}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })}
-            </>
-          )}
-
-          {filteredThreads.length === 0 && (
+          <section aria-label="All Contacts" className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+            <h2 className="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">All Contacts</h2>
+            {people.map(person => <button key={person.id} type="button"
+              className="w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 hover:bg-blue-50 dark:hover:bg-slate-800"
+              onClick={() => {
+                const direct = conversations.find(t => !t.isCustomRoom && t.targetUserIds?.includes(person.id));
+                if (direct) handleSelectThread(direct);
+                else void createThread({ targetUserIds: [person.id] });
+              }}>
+              <Avatar name={person.name} src={person.avatarUrl} />
+              <span className="min-w-0"><span className="block truncate text-sm font-semibold">{person.name}</span>
+                <span className="block text-xs text-slate-500">{person.language}</span></span>
+            </button>)}
+          </section>
+          {filteredThreads.length === 0 && people.length === 0 && q && (
             <p className="py-10 text-center text-xs text-slate-400">
               No people or rooms match &ldquo;{chatSearch}&rdquo;
             </p>
@@ -1711,6 +1738,7 @@ export default function App({
 
             {conversationTab === "chat" && (
               <ChatPanel
+          photoFor={photoFor}
                 selfId={selfId}
                 isCustomRoom={
                   isCustomRoomServer || Boolean(activeThread.isCustomRoom)
@@ -1811,10 +1839,8 @@ export default function App({
           }
         }}
         onEvent={(e) => {
-          if (e.type === "conversation:changed") {
-            void request("/api/conversations")
-              .then(setConversations)
-              .catch(report);
+          if (e.type === "conversation:changed" || e.type === "user:sync") {
+            void refreshThreads().catch(report);
             return;
           }
           if (e.type === "workspace:changed") {
@@ -1896,15 +1922,17 @@ export default function App({
       {/* FULL-SCREEN LOCKED CALL OVERLAY (Waiting / Incoming / Multi-Party)    */}
       {/* ===================================================================== */}
       {showCallOverlay && (
+        <dialog ref={callDialog} aria-label="Sahva call" className="fixed inset-0 m-0 h-dvh w-screen max-h-none max-w-none bg-slate-950" onCancel={event => event.preventDefault()}>
         <CallOverlay
+          photoFor={photoFor}
           roomId={activeRoomId}
           roomTitle={threadDisplayTitle}
           isCustomRoom={
             isCustomRoomServer || Boolean(activeThread.isCustomRoom)
           }
           selfId={selfId}
-          callPhase={callPhase}
-          callerId={callerId}
+          callPhase={dialing ? "ringing" : callPhase}
+          callerId={dialing ? selfId : callerId}
           selfParticipant={selfParticipant}
           participants={participants}
           fallbackPartnerName={
@@ -1939,6 +1967,7 @@ export default function App({
           onAddManualNote={handleAddManualNote}
           onDismissError={() => setCallError(null)}
         />
+        </dialog>
       )}
     </div>
   );

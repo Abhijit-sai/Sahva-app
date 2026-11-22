@@ -15,6 +15,13 @@
       "when": 1795307320745,
       "tag": "0001_localized_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795317004189,
+      "tag": "0002_eager_meteorite",
+      "breakpoints": true
     }
   ]
 }

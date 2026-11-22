@@ -30,8 +30,9 @@ class SahvaCallListenerService:Service() {
     }
     override fun onCreate(){
         super.onCreate()
+        instance = this
         nm.createNotificationChannel(NotificationChannel("sahva_ready","Call availability",NotificationManager.IMPORTANCE_LOW).apply{setSound(null,null)})
-        nm.createNotificationChannel(NotificationChannel("sahva_messages","Messages",NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel("sahva_messages","Messages",NotificationManager.IMPORTANCE_DEFAULT).apply { enableVibration(true); vibrationPattern = longArrayOf(0,55,45,80) })
         nm.createNotificationChannel(NotificationChannel("sahva_incoming_calls","Incoming calls",NotificationManager.IMPORTANCE_HIGH).apply{setSound(null,null);enableVibration(false);lockscreenVisibility=Notification.VISIBILITY_PUBLIC})
     }
     override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
@@ -79,12 +80,13 @@ class SahvaCallListenerService:Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val notice = Notification.Builder(this, "sahva_messages")
             .setSmallIcon(android.R.drawable.ic_dialog_email)
-            .setContentTitle("New Sahva message").setContentText("Open your workspace to read it.")
+            .setContentTitle("New Sahva message").setContentText(event.optString("senderName", "Open your workspace to read it."))
             .setCategory(Notification.CATEGORY_MESSAGE).setAutoCancel(true).setContentIntent(open).build()
         nm.notify(event.optString("roomId"), 104, notice)
     }
     private fun schedule(){if(!stopped){handler.removeCallbacks(reconnect);handler.postDelayed(reconnect,retry);retry=(retry*2).coerceAtMost(30000)}}
-    private fun ring(event:JSONObject){
+    fun dismiss(id: String?) { if (currentId == id) clearRing() }
+    fun ring(event:JSONObject){
         val id=event.getString("callSessionId")
         val remaining=Instant.parse(event.getString("expiresAt")).toEpochMilli()-System.currentTimeMillis()
         if(remaining<=0 || currentId==id)return
@@ -101,14 +103,17 @@ class SahvaCallListenerService:Service() {
             .setVisibility(Notification.VISIBILITY_PUBLIC).setFullScreenIntent(full,true).setContentIntent(full).setOngoing(true).setTimeoutAfter(remaining)
         if(Build.VERSION.SDK_INT>=31)n.setStyle(Notification.CallStyle.forIncomingCall(Person.Builder().setName(name).build(),decline,answer))
         else n.addAction(Notification.Action.Builder(null,"Decline",decline).build()).addAction(Notification.Action.Builder(null,"Answer",answer).build())
-        nm.notify(102,n.build())
+        if (nm.areNotificationsEnabled()) nm.notify(102,n.build())
+        val mode = requireNotNull(getSystemService(android.media.AudioManager::class.java)).ringerMode
+        if (mode == android.media.AudioManager.RINGER_MODE_NORMAL) {
         tone=RingtoneManager.getRingtone(this,RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))?.apply{
             audioAttributes=AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build()
             if(Build.VERSION.SDK_INT>=28)isLooping=true
             play()
         }
         if(Build.VERSION.SDK_INT<28)handler.postDelayed(repeatTone,1800)
-        vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0,450,450,450,1400),0),AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build())
+        }
+        if (mode != android.media.AudioManager.RINGER_MODE_SILENT) vibrator.vibrate(VibrationEffect.createWaveform(longArrayOf(0,450,450,450,1400),0),AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build())
         handler.postDelayed(timeout,remaining)
     }
     private fun clearRing(){
@@ -118,9 +123,11 @@ class SahvaCallListenerService:Service() {
         if(currentId!=null)sendBroadcast(Intent(CallStore.DISMISS).setPackage(packageName).putExtra("id",currentId))
         currentId=null
     }
-    override fun onDestroy(){stopped=true;handler.removeCallbacksAndMessages(null);ws?.cancel();ws=null;network.shutdownNow();clearRing();super.onDestroy()}
+    override fun onDestroy(){instance=null;stopped=true;handler.removeCallbacksAndMessages(null);ws?.cancel();ws=null;network.shutdownNow();clearRing();super.onDestroy()}
     override fun onBind(intent:Intent?):IBinder?=null
     companion object{
+        var instance: SahvaCallListenerService? = null
+            private set
         fun answerIntent(c:Context,e:JSONObject)=Intent(c,MainActivity::class.java).setAction(Intent.ACTION_VIEW)
             .setData(Uri.Builder().scheme("sahva").authority("call-answer").appendQueryParameter("roomId",e.getString("roomId")).appendQueryParameter("callSessionId",e.getString("callSessionId")).build())
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)

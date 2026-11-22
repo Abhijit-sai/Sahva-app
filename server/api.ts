@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, ilike, inArray, ne, or } from "drizzle-orm";
+import { and, desc, eq, sql, gt, ilike, inArray, ne, or } from "drizzle-orm";
 import { clerkClient } from "@clerk/express";
 import { db } from "../src/db";
 import {
@@ -8,6 +8,7 @@ import {
   conversations,
   calls,
   participants,
+  unreadMessages,
   tasks,
   notes,
   messages,
@@ -23,6 +24,7 @@ import {
   threadList,
 } from "./services/repository";
 import { uploadMedia, mediaUrl } from "./services/s3";
+import { sendUser } from './services/callSignaling';
 export const api = Router();
 export async function createRoom(owner: string, ids: string[], title?: string) {
   const all = [...new Set([owner, ...ids])].sort();
@@ -165,6 +167,15 @@ api.post(
     res.json({ avatarUrl: await avatar(key) });
   }),
 );
+api.get("/users", route(async (req, res) => {
+  const after = req.query.after ? uuid(req.query.after) : undefined;
+  const rows = await db.select({ id: users.id, name: users.displayName, language: users.preferredLanguageName, avatarUrl: users.avatarUrl })
+    .from(users).where(and(ne(users.id, currentUser(res).id), ne(users.clerkUserId, "internal:caller"),
+      after ? gt(users.id, after) : undefined)).orderBy(users.id).limit(101);
+  const page = rows.slice(0, 100);
+  res.json({ people: await Promise.all(page.map(async person => ({ ...person, avatarUrl: await avatar(person.avatarUrl) }))),
+    next: rows.length > page.length ? page[page.length - 1].id : null });
+}));
 api.get(
   "/users/search",
   route(async (req, res) => {
@@ -200,6 +211,18 @@ api.get(
     );
   }),
 );
+api.post("/conversations/:roomId/read", route(async (req, res) => {
+  const user = currentUser(res);
+  const room = await membership(user.id, req.params.roomId);
+  const through = uuid(req.body.through);
+  const changed = await db.delete(unreadMessages).where(and(eq(unreadMessages.userId, user.id),
+    eq(unreadMessages.conversationId, room.id), inArray(unreadMessages.messageId,
+      db.select({ id: messages.id }).from(messages).where(and(eq(messages.conversationId, room.id),
+        sql`(${messages.createdAt}, ${messages.id}) <= (select created_at, id from messages where id = ${through} and conversation_id = ${room.id})`)))))
+    .returning({ id: unreadMessages.messageId });
+  if (changed.length) sendUser(user.id, { type: "conversation:changed", roomId: room.roomKey });
+  res.json({ read: changed.length });
+}));
 api.get(
   "/conversations",
   route(async (_req, res) => {
