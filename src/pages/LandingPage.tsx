@@ -1,19 +1,20 @@
-import { MotionConfig, useReducedMotion } from "motion/react";
+import { useReducedMotion } from "../components/landing/keynote";
+import { MotionConfig } from "motion/react";
 import LandingNavbar from "../components/landing/LandingNavbar";
 import KeynoteRail from "../components/landing/KeynoteRail";
-import Act1Hero from "../components/landing/Act1Hero";
-import Act2ScrollStory from "../components/landing/Act2ScrollStory";
-import Act3InteractiveMixLab from "../components/landing/Act3InteractiveMixLab";
-import Act4LifecycleWalkthrough from "../components/landing/Act4LifecycleWalkthrough";
-import Act5LanguageContinuum from "../components/landing/Act5LanguageContinuum";
-import Act6PlatformAndFinale from "../components/landing/Act6PlatformAndFinale";
+import Act1MissionHero from "../components/landing/Act1MissionHero";
+import Act2RealWorldWalls from "../components/landing/Act2RealWorldWalls";
+import Act3ArchitectureEngine from "../components/landing/Act3ArchitectureEngine";
+import Act4ProductLifecycle from "../components/landing/Act4ProductLifecycle";
+import Act5LanguagesGrid from "../components/landing/Act5LanguagesGrid";
+import Act6PlatformsAndFinale from "../components/landing/Act6PlatformsAndFinale";
 import { ease } from "../components/landing/keynote";
 import "./landing.css";
 export default function LandingPage({ signedIn }: { signedIn: boolean }) {
   const reduced = useReducedMotion();
   return (
     <MotionConfig
-      reducedMotion="user"
+      reducedMotion={reduced ? "always" : "never"}
       transition={{ duration: reduced ? 0 : 0.3, ease }}
     >
       <div className="keynote">
@@ -23,12 +24,12 @@ export default function LandingPage({ signedIn }: { signedIn: boolean }) {
         <LandingNavbar signedIn={signedIn} />
         <KeynoteRail />
         <main id="presentation">
-          <Act1Hero signedIn={signedIn} />
-          <Act2ScrollStory />
-          <Act3InteractiveMixLab />
-          <Act4LifecycleWalkthrough />
-          <Act5LanguageContinuum />
-          <Act6PlatformAndFinale signedIn={signedIn} />
+          <Act1MissionHero signedIn={signedIn} />
+          <Act2RealWorldWalls />
+          <Act3ArchitectureEngine />
+          <Act4ProductLifecycle />
+          <Act5LanguagesGrid />
+          <Act6PlatformsAndFinale signedIn={signedIn} />
         </main>
       </div>
     </MotionConfig>

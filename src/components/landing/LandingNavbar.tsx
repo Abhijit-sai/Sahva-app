@@ -3,9 +3,9 @@ import { ArrowUpRight } from "lucide-react";
 import { useMotionValueEvent, useScroll } from "motion/react";
 import BrandImage from "../BrandImage";
 export const links = [
-  ["The Idea", "idea"],
-  ["Mix Lab", "mix-lab"],
-  ["Walkthrough", "walkthrough"],
+  ["Impact", "impact"],
+  ["Architecture", "architecture"],
+  ["Product", "product"],
   ["Languages", "languages"],
 ] as const;
 export default function LandingNavbar({ signedIn }: { signedIn: boolean }) {
@@ -15,7 +15,7 @@ export default function LandingNavbar({ signedIn }: { signedIn: boolean }) {
   return (
     <header className={"kn-nav" + (scrolled ? " scrolled" : "")}>
       <div className="kn-navbar">
-        <a href="#intro" aria-label="Sahva home">
+        <a href="#mission" aria-label="Sahva home">
           <BrandImage className="kn-logo" />
         </a>
         <nav aria-label="Presentation topics">

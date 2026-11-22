@@ -1979,6 +1979,7 @@ async function startServer() {
       res.status(404).end(),
     );
     app.use(express.static(distPath));
+    // The web entry selects the keynote or the Clerk workspace for SPA deep links.
     app.get("*", (_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });

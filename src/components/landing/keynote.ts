@@ -1,52 +1,35 @@
-import { useEffect, useRef, useState } from "react";
-import { useMotionValueEvent, useReducedMotion, useScroll } from "motion/react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useMotionValueEvent,
+  useReducedMotion as useMotionPreference,
+  useScroll,
+} from "motion/react";
 
+const motionQuery = "(prefers-reduced-motion: reduce)";
+function subscribeMotionPreference(update: () => void) {
+  const query = matchMedia(motionQuery);
+  query.addEventListener("change", update);
+  return () => query.removeEventListener("change", update);
+}
+// Also follow preference changes made while a presentation is open.
+export function useReducedMotion() {
+  const initial = useMotionPreference();
+  return useSyncExternalStore(
+    subscribeMotionPreference,
+    () => matchMedia(motionQuery).matches,
+    () => Boolean(initial),
+  );
+}
 export const ease = [0.22, 1, 0.36, 1] as const;
 export const spring = { stiffness: 180, damping: 28, mass: 0.9 };
 export const acts = [
-  ["intro", "Intro"],
-  ["idea", "The Shift"],
-  ["mix-lab", "Mix Lab"],
-  ["walkthrough", "Lifecycle"],
+  ["mission", "Mission"],
+  ["impact", "Impact"],
+  ["architecture", "Architecture"],
+  ["product", "Product"],
   ["languages", "Languages"],
   ["platforms", "Launch"],
 ] as const;
-export const pairs = [
-  {
-    from: "Telugu",
-    to: "English",
-    src: "te-IN",
-    dst: "en-US",
-    codes: "TE ↔ EN",
-    speaker: "Arjun",
-    listener: "Maya",
-    original: "అవి ఐదు స్లైడ్స్ ఉండాలి, మాయ.",
-    translated: "They were supposed to be five slides, Maya.",
-  },
-  {
-    from: "Japanese",
-    to: "Spanish",
-    src: "ja-JP",
-    dst: "es-ES",
-    codes: "JA ↔ ES",
-    speaker: "Kenji",
-    listener: "Elena",
-    original: "明日、一緒に確認しましょう。",
-    translated: "Revisémoslo juntos mañana.",
-  },
-  {
-    from: "Hindi",
-    to: "English",
-    src: "hi-IN",
-    dst: "en-US",
-    codes: "HI ↔ EN",
-    speaker: "Asha",
-    listener: "Maya",
-    original: "मैं आपको बैठक के नोट्स भेज दूँगी।",
-    translated: "I’ll send you the meeting notes.",
-  },
-] as const;
-
 export function useChapterSteps(count: number) {
   const ref = useRef<HTMLElement>(null);
   const reduced = useReducedMotion();
