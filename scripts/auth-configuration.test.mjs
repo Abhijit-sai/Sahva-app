@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ClerkAPIResponseError } from "@clerk/react/errors";
+import { requiresSignUpTransfer } from "../src/lib/signUpTransfer.ts";
 import { authenticate } from "../server/middleware/auth.ts";
+
+test("only an explicit Clerk transfer response starts signup after email verification", () => {
+  const response = code => new ClerkAPIResponseError("Verification", {
+    status: 422, data: [{ code, message: "Verification" }],
+  });
+  assert.equal(requiresSignUpTransfer(response("sign_up_if_missing_transfer")), true);
+  assert.equal(requiresSignUpTransfer({ code: "sign_up_if_missing_transfer" }), true);
+  assert.equal(requiresSignUpTransfer(response("form_code_incorrect")), false);
+  assert.equal(requiresSignUpTransfer(null), false);
+});
 
 test("a missing server verification key does not mark a user's session expired", async () => {
   const names = ["CLERK_SECRET_KEY", "CLERK_JWT_KEY"];

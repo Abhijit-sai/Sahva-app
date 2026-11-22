@@ -3,6 +3,7 @@ import { useSignIn, useSignUp } from "@clerk/react";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
 import { native, webOrigin } from "../lib/runtimeConfig";
+import { requiresSignUpTransfer } from "../lib/signUpTransfer";
 import SahvaLogo from "./SahvaLogo";
 
 export function oauthDestination() {
@@ -71,7 +72,7 @@ export default function LaunchScreen() {
       if (step === "code") {
         const verified = await signIn.emailCode.verifyCode({ code });
         let attempt: typeof signIn | typeof signUp = signIn;
-        if (verified.error?.code === "sign_up_if_missing_transfer") {
+        if (requiresSignUpTransfer(verified.error)) {
           const created = await signUp.create({ transfer: true });
           if (created.error) throw created.error;
           attempt = signUp;
