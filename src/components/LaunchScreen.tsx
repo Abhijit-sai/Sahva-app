@@ -3,6 +3,7 @@ import { useSignIn, useSignUp } from "@clerk/clerk-react";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
 import { native, webOrigin } from "../lib/runtimeConfig";
+import SahvaLogo from "./SahvaLogo";
 
 export async function google(signIn: ReturnType<typeof useSignIn>["signIn"]) {
   if (!signIn) return;
@@ -97,11 +98,7 @@ export default function LaunchScreen() {
   return (
     <main className="entry">
       <section className="entry-card">
-        <div className="tracks" aria-hidden="true">
-          <i />
-          <i />
-        </div>
-        <h1>Sahva</h1>
+        <h1><SahvaLogo /></h1>
         <p>Speak your language. Hear theirs in yours.</p>
         {step === "welcome" ? (
           <div className="entry-actions">

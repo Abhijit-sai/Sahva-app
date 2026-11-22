@@ -29,6 +29,7 @@ import {
   Clock,
 } from "lucide-react";
 import Avatar from "./components/Avatar";
+import SahvaLogo from "./components/SahvaLogo";
 import ChatPanel from "./components/ChatPanel";
 import MeetingNotesView from "./components/MeetingNotesView";
 import CallOverlay from "./components/CallOverlay";
@@ -1265,9 +1266,7 @@ export default function App({
         {/* Sahva Brand Header (No moon icon — Search sits right underneath) */}
         <div className="px-5 pt-4 pb-3 flex items-center justify-between gap-2 shrink-0">
           <div className="min-w-0">
-            <span className="font-display text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-              Sahva
-            </span>
+            <SahvaLogo compact />
           </div>
           <button
             type="button"

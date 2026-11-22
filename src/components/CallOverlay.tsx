@@ -451,7 +451,7 @@ export default function CallOverlay({
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
               {activeHeaderTitle}
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+            <p className="font-mono text-xs text-slate-500 dark:text-slate-400 truncate">
               {uniqueLanguages.join(" ↔ ")}
             </p>
           </div>

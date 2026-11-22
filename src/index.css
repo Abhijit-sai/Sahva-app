@@ -1,6 +1,30 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  src: url("/fonts/plus-jakarta-sans/regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans/regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/jetbrains-mono/regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+}
+
 @theme {
   --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
@@ -93,9 +117,7 @@ input[type="range"].mixer-slider::-webkit-slider-thumb:hover {
 .entry-card button:disabled {opacity:.6}
 .entry-card .selected {background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
 .entry-card [role=alert] {color:#a02828}
-.tracks,.step-indicator {display:flex;gap:4px}
-.tracks i {width:12px;height:34px;border-radius:8px;background:#2359d2;transform:skewY(-25deg)}
-.tracks i+i {background:#93b9f8;transform:translateY(7px) skewY(-25deg)}
+.step-indicator {display:flex;gap:4px}
 .step-indicator i {background:#e6ecf2;border-radius:4px;height:3px;flex:1}
 .step-indicator .filled {background:#2861db}
 .language-list {display:grid;gap:4px;max-height:32vh;overflow:auto}

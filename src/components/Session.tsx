@@ -1,3 +1,4 @@
+import SahvaLogo from "./SahvaLogo";
 import { useEffect, useState } from "react";
 import {
   AuthenticateWithRedirectCallback,
@@ -182,7 +183,7 @@ export default function Session() {
     return (
       <main className="entry">
         <section className="entry-card">
-          <h1>Sahva</h1>
+          <h1><SahvaLogo /></h1>
           <p>
             {isSignedIn
               ? "Continue with " +

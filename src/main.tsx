@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ClerkProvider } from "@clerk/clerk-react";
 import { Capacitor } from "@capacitor/core";
 import Session from "./components/Session";
+import SahvaLogo from "./components/SahvaLogo";
 import { base } from "./lib/runtimeConfig";
 import "./index.css";
 
@@ -66,7 +67,7 @@ function Bootstrap() {
     return (
       <main className="entry">
         <section className="entry-card">
-          <h1>Sahva</h1>
+          <h1><SahvaLogo /></h1>
           <p>{error || "Connecting…"}</p>
           {error && (
             <button

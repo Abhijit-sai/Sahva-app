@@ -127,7 +127,7 @@ export default function CallLogView({
                         )}
 
                         <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                          <span>{entry.languages.join(" ↔ ")}</span>
+                          <span className="font-mono">{entry.languages.join(" ↔ ")}</span>
                           <span className="mx-1.5" aria-hidden="true">
                             ·
                           </span>

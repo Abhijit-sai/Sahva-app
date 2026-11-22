@@ -485,7 +485,7 @@ export default function MeetingNotesView({
                   {formatDate(n.createdAt)} · {formatDuration(n.durationSeconds)}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 truncate">
-                  {formatLanguagesLine(n)} · {doneTodos}/{totalTodos} to-dos
+                  <span className="font-mono">{formatLanguagesLine(n)}</span> · {doneTodos}/{totalTodos} to-dos
                 </p>
               </button>
             );

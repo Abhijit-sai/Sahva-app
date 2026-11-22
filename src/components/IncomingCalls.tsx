@@ -203,7 +203,7 @@ export default function IncomingCalls({
       <div>
         <p className="text-slate-300">Incoming call</p>
         <h1 className="text-4xl my-5">{active.caller.name}</h1>
-        <p>
+        <p className="font-mono">
           {active.caller.languageName} ↔ {language}
         </p>
         <div className="flex gap-4 justify-center mt-12">

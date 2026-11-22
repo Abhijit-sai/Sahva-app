@@ -12,4 +12,5 @@ dist-server
 *.jks
 *.keystore
 *.apk
+*.dump
 

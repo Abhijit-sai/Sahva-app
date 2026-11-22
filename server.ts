@@ -1,3 +1,4 @@
+import "./server/env";
 import { MixedRecording } from "./server/services/recording";
 import { nativeAuth } from "./server/nativeAuth";
 import {
@@ -35,7 +36,6 @@ import { uploadMedia, mediaUrl } from "./server/services/s3";
 import express from "express";
 import path from "path";
 import crypto from "crypto";
-import dotenv from "dotenv";
 
 import { GoogleGenAI, Modality, ThinkingLevel, Type } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
@@ -53,8 +53,6 @@ import type {
   VoiceTone,
 } from "./src/types";
 
-dotenv.config();
-
 const app = express();
 app.disable("x-powered-by");
 app.get("/public-config", (req, res) => {
@@ -64,7 +62,7 @@ app.get("/public-config", (req, res) => {
   }
   res
     .set("Cache-Control", "no-store")
-    .json({ publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || "" });
+    .json({ publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY || "" });
 });
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 app.use("/api", (req, res, next) => {
