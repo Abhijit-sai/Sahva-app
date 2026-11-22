@@ -36,12 +36,20 @@ export const origins = () =>
     .map((value) => new URL(value!).origin);
 export async function authenticate(token: string) {
   if (!token) throw new HttpError(401, "Sign in to Sahva.");
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  const jwtKey = process.env.CLERK_JWT_KEY;
+  const unavailable = "Sahva can’t verify sign-ins right now. Please try again later.";
+  if (!secretKey && !jwtKey) throw new HttpError(503, unavailable);
   const claims = await verifyToken(token, {
-    secretKey: process.env.CLERK_SECRET_KEY,
-    jwtKey: process.env.CLERK_JWT_KEY,
+    secretKey,
+    jwtKey,
     authorizedParties: origins(),
-  }).catch(() => {
-    throw new HttpError(401, "Your session has expired.");
+  }).catch((error) => {
+    if (["secret-key-invalid", "jwk-local-missing", "jwk-remote-failed-to-load", "jwk-remote-invalid"].includes(error?.reason))
+      throw new HttpError(503, unavailable);
+    if (error?.reason === "token-expired")
+      throw new HttpError(401, "Your session has expired. Please sign in again.");
+    throw new HttpError(401, "Your session could not be verified. Please sign in again.");
   });
   if (!claims.sub || !claims.sid)
     throw new HttpError(401, "A user session is required.");
@@ -57,6 +65,7 @@ export async function authenticate(token: string) {
         .where(eq(users.id, existing.id));
     return existing;
   }
+  if (!secretKey) throw new HttpError(503, unavailable);
   const account = await clerkClient.users.getUser(claims.sub);
   const primary = account.emailAddresses.find(
     (e) =>

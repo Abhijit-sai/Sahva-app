@@ -1954,7 +1954,7 @@ async function startServer() {
         .status(err.status || 500)
         .json({
           error:
-            err.status && err.status < 500
+            (err.status && err.status < 500) || (err instanceof HttpError && err.status === 503)
               ? err.message
               : "Request failed. Please try again.",
         });
