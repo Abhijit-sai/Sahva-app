@@ -6,6 +6,7 @@ import {
   bridge,
   webOrigin,
 } from "./lib/runtimeConfig";
+import { useMicrophoneAccess } from "./components/useMicrophoneAccess";
 import IncomingCalls from "./components/IncomingCalls";
 import NotificationReminder from "./components/NotificationReminder";
 import type { User as SahvaUser } from "./db/schema";
@@ -206,6 +207,7 @@ export default function App({
   const [directory, setDirectory] = useState<
     { id: string; name: string; language: string; avatarUrl?: string }[]
   >([]);
+  const { requestMicrophone, cancel: cancelMicrophone, permissionDialog } = useMicrophoneAccess();
   const [notice, setNotice] = useState("");
   const [offerAlerts, setOfferAlerts] = useState(false);
   const report = (e: Error) => setNotice(e.message);
@@ -367,6 +369,7 @@ export default function App({
   }, [callPhase, callStartedAt]);
 
   const stopLocalAudio = useCallback(() => {
+    cancelMicrophone();
     if (native) void bridge.stopActiveCallForegroundService().catch(() => {});
     if (audioEngineRef.current) {
       audioEngineRef.current.stop();
@@ -383,7 +386,7 @@ export default function App({
       translatedInLevel: 0,
       isDuckingActive: false,
     });
-  }, []);
+  }, [cancelMicrophone]);
 
   const mergeRoomNotes = useCallback(
     (roomId: string, incoming: MeetingNoteRecord[]) => {
@@ -767,6 +770,7 @@ export default function App({
           }
         },
         (nextLevels) => setLevels(nextLevels),
+        requestMicrophone,
       );
       if (attempt.current !== ticket) { engine.stop(); return; }
       if (!accepted.current) {
@@ -806,6 +810,7 @@ export default function App({
       stopLocalAudio();
       if(callSession.current)void request("/api/calls/"+callSession.current+"/join-failed","POST",{}).catch(report);
       accepted.current=false;callSession.current=null;
+      if (err?.name === "AbortError") return;
       setNotice(err?.name === "NotAllowedError"
         ? "Allow microphone access in your device or site settings, then tap Call again."
         : err?.message || "Could not join call.");
@@ -816,7 +821,7 @@ export default function App({
     } finally {
       if (attempt.current === ticket) setIsJoiningCall(false);
     }
-  }, [inCall, isJoiningCall, sendWs, stopLocalAudio]);
+  }, [inCall, isJoiningCall, sendWs, stopLocalAudio, requestMicrophone]);
 
   // Auto-start call when triggered from Call Log "Call Back" button
   useEffect(() => {
@@ -1808,6 +1813,7 @@ export default function App({
       </main>
 
       {/* ===================================================================== */}
+      {permissionDialog}
       {notice && (
         <div
           role="alert"

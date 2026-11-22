@@ -127,7 +127,8 @@ export class CallAudioEngine {
 
   public async start(
     onMicChunk: (pcm16kBase64: string, rms: number) => void,
-    onLevels: (levels: AudioMeterLevels) => void
+    onLevels: (levels: AudioMeterLevels) => void,
+    requestMicrophone = (constraints: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(constraints),
   ): Promise<void> {
     this.onMicChunk = onMicChunk;
     this.onLevels = onLevels;
@@ -155,29 +156,21 @@ export class CallAudioEngine {
       this.translatedAnalyser.connect(this.playbackCtx.destination);
     }
 
-    if (this.playbackCtx.state === "suspended") {
-      await this.playbackCtx.resume();
-    }
-
-    this.nextOriginalStart = this.playbackCtx.currentTime;
-    this.nextTranslatedStart = this.playbackCtx.currentTime;
+    const playback = this.playbackCtx;
+    await Promise.all([
+      requestMicrophone({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }).then(stream => {
+        if (this.playbackCtx !== playback) {
+          stream.getTracks().forEach(track => track.stop());
+          throw new DOMException("Call ended.", "AbortError");
+        }
+        this.mediaStream = stream;
+      }),
+      playback.state === "suspended" ? playback.resume() : Promise.resolve(),
+    ]);
+    if (!this.mediaStream || this.playbackCtx !== playback) throw new DOMException("Call ended.", "AbortError");
+    this.nextOriginalStart = playback.currentTime;
+    this.nextTranslatedStart = playback.currentTime;
     this.applyGainTargets();
-
-    // 2. Capture microphone with acoustic echo cancellation enabled
-    if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error(
-        "Microphone capture is not available in this browser context."
-      );
-    }
-
-    this.mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      },
-    });
 
     this.captureCtx = new (window.AudioContext ||
       (window as unknown as { webkitAudioContext: typeof AudioContext })

@@ -39,6 +39,7 @@ import crypto from "crypto";
 
 import { GoogleGenAI, Modality, ThinkingLevel, Type } from "@google/genai";
 import { WebSocketServer, WebSocket } from "ws";
+import { liveSourcePolicy, liveTranslationCandidates, unexpectedSource } from "./server/liveSourceLanguage";
 import { getLanguageCode, areSameLanguage } from "./src/data/languages";
 import type {
   CallPhase,
@@ -697,7 +698,6 @@ async function connectGeminiTranslateSession(
   sourceLangName: string,
   targetLangName: string,
   targetLangCode: string,
-  sameLanguage: boolean,
   voiceName: string,
   preferredModel: TranslationModelPreference,
   callbacks: {
@@ -708,147 +708,10 @@ async function connectGeminiTranslateSession(
 ) {
   // @google/genai >= 3.x defaults to apiVersion "v1", which returns 404 on BidiGenerateContent.
   // Explicitly target v1alpha / v1beta for Live API sessions.
-  // Pass BCP-47 languageCodes hint in inputAudioTranscription so Gemini never misdetects Telugu as Vietnamese/French!
-  const sourceLangCode = getLanguageCode(sourceLangName);
-
-  const translateConfigWithHintsAndVoice: any = {
-    responseModalities: [Modality.AUDIO],
-    speechConfig: {
-      voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-    },
-    inputAudioTranscription: {
-      languageCodes: [sourceLangCode],
-    },
-    outputAudioTranscription: {},
-    translationConfig: {
-      targetLanguageCode: targetLangCode,
-      echoTargetLanguage: sameLanguage,
-    },
-  };
-
-  const translateConfigWithHints: any = {
-    responseModalities: [Modality.AUDIO],
-    inputAudioTranscription: {
-      languageCodes: [sourceLangCode],
-    },
-    outputAudioTranscription: {},
-    translationConfig: {
-      targetLanguageCode: targetLangCode,
-      echoTargetLanguage: sameLanguage,
-    },
-  };
-
-  const translateConfigBasic: any = {
-    responseModalities: [Modality.AUDIO],
-    inputAudioTranscription: { languageCodes: [sourceLangCode] },
-    outputAudioTranscription: {},
-    translationConfig: {
-      targetLanguageCode: targetLangCode,
-      echoTargetLanguage: sameLanguage,
-    },
-  };
-
-  const interpreterInstruction = sameLanguage
-    ? `You are a strict real-time speech repeater. The speaker is speaking ONLY ${sourceLangName} (BCP-47: ${sourceLangCode}). Never assume another language. Listen carefully to spoken ${sourceLangName} and restate it cleanly and naturally in ${targetLangName}. Never answer questions or add commentary.`
-    : `You are a strict simultaneous live call interpreter. The input audio is spoken in ${sourceLangName} (BCP-47: ${sourceLangCode}) — sometimes with occasional proper nouns or English tech terms. ALWAYS recognize the speaker's speech as ${sourceLangName}, never as Vietnamese, French, or any unrelated language. Immediately speak ONLY the accurate, natural translation in ${targetLangName}. Never reply to the speaker, never greet, and never add explanations or commentary.`;
-
-  const interpreterConfigWithHints: any = {
-    responseModalities: [Modality.AUDIO],
-    speechConfig: {
-      voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-    },
-    inputAudioTranscription: {
-      languageCodes: [sourceLangCode],
-    },
-    outputAudioTranscription: {},
-    systemInstruction: interpreterInstruction,
-  };
-
-  const interpreterConfigBasic: any = {
-    responseModalities: [Modality.AUDIO],
-    speechConfig: {
-      voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-    },
-    inputAudioTranscription: { languageCodes: [sourceLangCode] },
-    outputAudioTranscription: {},
-    systemInstruction: interpreterInstruction,
-  };
-
-  const liveTranslateCandidates = [
-    {
-      apiVersion: "v1alpha",
-      model: "gemini-3.5-live-translate-preview",
-      config: translateConfigWithHintsAndVoice,
-      delayMs: 0,
-    },
-    {
-      apiVersion: "v1alpha",
-      model: "gemini-3.5-live-translate-preview",
-      config: translateConfigWithHints,
-      delayMs: 120,
-    },
-    {
-      apiVersion: "v1beta",
-      model: "gemini-3.5-live-translate-preview",
-      config: translateConfigWithHints,
-      delayMs: 150,
-    },
-    {
-      apiVersion: "v1alpha",
-      model: "gemini-3.5-live-translate-preview",
-      config: translateConfigBasic,
-      delayMs: 150,
-    },
-  ];
-
-  const interpreterCandidates = [
-    {
-      apiVersion: "v1beta",
-      model: "gemini-3.8-live",
-      config: interpreterConfigWithHints,
-      delayMs: 0,
-    },
-    {
-      apiVersion: "v1alpha",
-      model: "gemini-3.8-live",
-      config: interpreterConfigWithHints,
-      delayMs: 150,
-    },
-    {
-      apiVersion: "v1beta",
-      model: "gemini-3.8-live",
-      config: interpreterConfigBasic,
-      delayMs: 200,
-    },
-  ];
-
-  let candidates: Array<{
-    apiVersion: string;
-    model: string;
-    config: any;
-    delayMs: number;
-  }>;
-
-  if (preferredModel === "gemini-3.8-live") {
-    candidates = [
-      ...interpreterCandidates,
-      ...liveTranslateCandidates.map((c) => ({ ...c, delayMs: 250 })),
-    ];
-  } else if (preferredModel === "gemini-3.5-live-translate-preview") {
-    candidates = [
-      ...liveTranslateCandidates,
-      ...interpreterCandidates.map((c) => ({ ...c, delayMs: 250 })),
-    ];
-  } else {
-    candidates = [
-      ...liveTranslateCandidates,
-      ...interpreterCandidates.map((c) => ({ ...c, delayMs: 200 })),
-    ];
-  }
-
+  const candidates = liveTranslationCandidates(sourceLangName, targetLangName, voiceName, preferredModel);
   let lastErr: any = null;
   for (const candidate of candidates) {
-    if (candidate.delayMs > 0) await sleep(candidate.delayMs);
+    if (lastErr) await sleep(150);
     try {
       const client = createGeminiClient(candidate.apiVersion);
       const session = await openLiveSessionWithHandshake(
@@ -858,7 +721,7 @@ async function connectGeminiTranslateSession(
         callbacks,
       );
       console.log(
-        `[Live Translate] Connected ${candidate.model} (${candidate.apiVersion}) (${sourceLangName}[${sourceLangCode}] -> ${targetLangName}[${targetLangCode}], voice=${voiceName})`,
+        `[Live Translate] Connected ${candidate.model} (${candidate.apiVersion}) (${sourceLangName} -> ${targetLangName}[${targetLangCode}], voice=${voiceName})`,
       );
       return session;
     } catch (err: any) {
@@ -880,13 +743,14 @@ async function ensureTranslatorForLanguage(
   room: CallRoom,
   speakerSlot: ParticipantSlot,
   targetLanguage: string,
+  recoverSource = false,
 ) {
   if (!speakerSlot.inCall || room.callPhase !== "active") return;
   const targetLangCode = getLanguageCode(targetLanguage);
   const existing = speakerSlot.translatorsByLang.get(targetLangCode);
 
   if (
-    existing &&
+    existing && !recoverSource &&
     existing.modelPreference === speakerSlot.preferredModel &&
     existing.voiceTone === speakerSlot.voiceTone &&
     (existing.ready || existing.connecting)
@@ -895,11 +759,10 @@ async function ensureTranslatorForLanguage(
   }
 
   if (existing) {
-    closeSingleTranslator(existing);
     speakerSlot.translatorsByLang.delete(targetLangCode);
+    closeSingleTranslator(existing);
   }
 
-  const sameLang = areSameLanguage(speakerSlot.language, targetLanguage);
   const translator: OutboundTranslator = {
     targetLanguage,
     targetLangCode,
@@ -916,15 +779,16 @@ async function ensureTranslatorForLanguage(
   speakerSlot.translatorsByLang.set(targetLangCode, translator);
 
   const voiceName = getPrebuiltVoiceForTone(speakerSlot.voiceTone);
+  const { allowed } = liveSourcePolicy(speakerSlot.language);
+  let unexpectedLetters = 0;
 
   try {
     const session = await connectGeminiTranslateSession(
       speakerSlot.language,
       targetLanguage,
       targetLangCode,
-      sameLang,
       voiceName,
-      speakerSlot.preferredModel,
+      recoverSource ? "gemini-3.8-live" : speakerSlot.preferredModel,
       {
         onmessage: (message: any) => {
           if (
@@ -938,8 +802,22 @@ async function ensureTranslatorForLanguage(
           const content = message.serverContent;
           if (!content) return;
 
+          const input = content.inputTranscription;
+          const unrelated = input && unexpectedSource(input, allowed);
+          if (input?.text) {
+            unexpectedLetters = unrelated
+              ? unexpectedLetters + (input.text.match(/\p{L}/gu)?.length || 0)
+              : 0;
+            // Re-anchor one stream at most once. No detection request blocks first audio.
+            if (unrelated && unexpectedLetters >= 8 && !recoverSource) {
+              void ensureTranslatorForLanguage(room, speakerSlot, targetLanguage, true);
+              return;
+            }
+          }
+
           // 1. Route translated 24kHz PCM audio STRICTLY to OTHER in-call participants whose language matches targetLangCode
-          const parts = content.modelTurn?.parts ?? [];
+          const sourceDrift = unexpectedLetters >= 8;
+          const parts = sourceDrift ? [] : content.modelTurn?.parts ?? [];
           for (const part of parts) {
             if (part?.inlineData?.data) {
               for (const listener of room.participants.values()) {
@@ -963,7 +841,7 @@ async function ensureTranslatorForLanguage(
 
           // 2. Capture live transcriptions across all target languages
           let captionUpdated = false;
-          if (content.inputTranscription?.text) {
+          if (input?.text && !unrelated) {
             const chunk = content.inputTranscription.text;
             translator.pendingOriginalText += chunk;
             // Use the first translator's input transcription as canonical original text
@@ -976,7 +854,7 @@ async function ensureTranslatorForLanguage(
             }
             captionUpdated = true;
           }
-          if (content.outputTranscription?.text) {
+          if (content.outputTranscription?.text && !sourceDrift) {
             translator.pendingTranslatedText +=
               content.outputTranscription.text;
             speakerSlot.pendingTurnTranslations[targetLanguage] =
@@ -1019,6 +897,7 @@ async function ensureTranslatorForLanguage(
           }
 
           if (content.turnComplete) {
+            unexpectedLetters = 0;
             if (speakerSlot.turnFlushTimer) {
               clearTimeout(speakerSlot.turnFlushTimer);
             }
@@ -1032,6 +911,7 @@ async function ensureTranslatorForLanguage(
           }
         },
         onerror: (err: any) => {
+          if (speakerSlot.translatorsByLang.get(targetLangCode) !== translator) return;
           console.error(
             `[Live Translate] Error on ${speakerSlot.name} -> ${targetLanguage}:`,
             err,
@@ -1079,7 +959,7 @@ async function ensureTranslatorForLanguage(
     translator.connecting = false;
     translator.ready = true;
 
-    const queued = translator.pendingAudioQueue.splice(0, 12);
+    const queued = translator.pendingAudioQueue.splice(0);
     for (const pcm16k of queued) {
       try {
         session.sendRealtimeInput({

@@ -1,3 +1,4 @@
+import { useMicrophoneAccess } from "./useMicrophoneAccess";
 import { useEffect, useRef, useState } from "react";
 import { Check, Mic, Volume2, Bell, ArrowRight } from "lucide-react";
 import { notificationAccess, enableNotifications } from "../lib/notifications";
@@ -14,6 +15,7 @@ type Outcome = "ready" | "skipped" | undefined;
 export default function DeviceSetup({ finish, busy, name }: {
   finish: () => void; busy: boolean; name: string;
 }) {
+  const { requestMicrophone, cancel: cancelMicrophone, permissionDialog } = useMicrophoneAccess();
   const [outcomes, setOutcomes] = useState<Outcome[]>([undefined, undefined, undefined]);
   const step = outcomes.findIndex(value => !value);
   const [working, setWorking] = useState(false);
@@ -86,13 +88,13 @@ export default function DeviceSetup({ finish, busy, name }: {
       stream?.getTracks().forEach(track => track.stop());
       if (ctx && ctx.state !== "closed") void ctx.close().catch(() => {});
     };
-    stop.current = release;
+    stop.current = () => { cancelMicrophone(); release(); };
     setMessage(""); setHeard(false); setWorking(true);
     try {
       ctx = new AudioContext();
+      stream = await requestMicrophone({ audio: true });
+      if (attempt !== generation.current) { release(); return; }
       await ctx.resume();
-      if (attempt !== generation.current) return;
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (attempt !== generation.current) { release(); return; }
       const analyser = ctx.createAnalyser();
       ctx.createMediaStreamSource(stream).connect(analyser);
@@ -114,6 +116,7 @@ export default function DeviceSetup({ finish, busy, name }: {
       release();
       if (attempt !== generation.current) return;
       setWorking(false);
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setMessage(err instanceof DOMException && err.name === "NotAllowedError"
         ? "Microphone access is off. You can allow it in settings or try again when you make a call."
         : "Couldn’t hear your microphone. Check your input and try again.");
@@ -136,6 +139,7 @@ export default function DeviceSetup({ finish, busy, name }: {
     finally { if (attempt === generation.current) setWorking(false); }
   }
   return <>
+    {permissionDialog}
     <ul className="setup-checklist" aria-label="Device checks">
       {checks.map(({ name: title, icon: Icon }, i) => <li key={title} className={step === i ? "current" : ""}>
         <Icon size={18} aria-hidden="true"/><span>{title}</span>
@@ -149,8 +153,8 @@ export default function DeviceSetup({ finish, busy, name }: {
       {message && <p role="status">{message}</p>}
       {step === 1 && heard && <button type="button" onClick={() => complete(1,"ready")}><Check size={16}/> I heard it</button>}
       {step >= 0 ? <>
-        <button type="button" className={heard ? "secondary" : ""} disabled={working || (blocked && !native)} onClick={step === 0 ? checkMicrophone : step === 1 ? checkSpeaker : notifications}>
-          {step === 0 ? working ? "Listening…" : "Check microphone" : step === 1 ? working ? "Playing…" : heard ? "Play again" : "Play test sound" : blocked ? native ? "Open notification settings" : "Allow alerts in site settings" : working ? "Checking…" : "Enable notifications"}
+        <button type="button" className={heard ? "secondary" : ""} disabled={working} onClick={step === 0 ? checkMicrophone : step === 1 ? checkSpeaker : notifications}>
+          {step === 0 ? working ? "Listening…" : "Check microphone" : step === 1 ? working ? "Playing…" : heard ? "Play again" : "Play test sound" : blocked ? native ? "Open notification settings" : "Retry notification permission" : working ? "Checking…" : "Enable notifications"}
         </button>
         <button type="button" className="setup-link" onClick={() => complete(step,"skipped")}>Skip for now</button>
       </> : <button className="setup-launch" disabled={busy} onClick={finish}>{busy ? "Opening your workspace…" : "Open my workspace"} <ArrowRight size={18}/></button>}

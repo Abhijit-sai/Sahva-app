@@ -1,3 +1,4 @@
+import { useMicrophoneAccess } from "./useMicrophoneAccess";
 import { useState, useRef, useEffect, type FormEvent } from "react";
 import {
   Send,
@@ -81,6 +82,8 @@ export default function ChatPanel({
   onOpenNote,
   onDismissVoiceError,
 }: ChatPanelProps) {
+  const { requestMicrophone, cancel: cancelMicrophone, permissionDialog } = useMicrophoneAccess();
+  useEffect(() => cancelMicrophone, [roomTitle, inviteUrl, cancelMicrophone]);
   const [draft, setDraft] = useState("");
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -159,7 +162,7 @@ export default function ChatPanel({
     onDismissVoiceError();
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await requestMicrophone({ audio: true });
       mediaStreamRef.current = stream;
 
       const preferredMime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
@@ -193,6 +196,7 @@ export default function ChatPanel({
         );
       }, 300);
     } catch (err: any) {
+      if (err?.name === "AbortError") return;
       cleanupRecorder();
       setMicPermissionError(
         err?.name === "NotAllowedError" ? "Allow microphone access in your device or site settings, then tap the microphone again." : err?.message ||
@@ -569,6 +573,7 @@ export default function ChatPanel({
           )}
         </div>
       </div>
+      {permissionDialog}
     </div>
   );
 }

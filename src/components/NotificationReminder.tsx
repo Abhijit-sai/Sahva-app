@@ -18,14 +18,14 @@ export default function NotificationReminder({ close }: { close: () => void }) {
     <Bell size={18} aria-hidden="true"/>
     <div><strong>Get alerts for calls and replies</strong>
       {access === "denied" && <p>Allow notifications in {native ? "Android" : "your browser’s site"} settings.</p>}
-      <div>{(native || access === "prompt") && <button disabled={busy} onClick={async () => {
+      <div><button disabled={busy} onClick={async () => {
         setBusy(true);
         try {
           if (access === "denied" && native) await bridge.openNotificationSettings();
           else setAccess(await enableNotifications());
         } catch { setAccess("denied"); }
         finally { setBusy(false); }
-      }}>{access === "denied" ? "Open settings" : "Enable alerts"}</button>}
+      }}>{access === "denied" ? native ? "Open settings" : "Retry permission" : "Enable alerts"}</button>
       <button onClick={close}>Not now</button></div>
     </div>
   </aside>;

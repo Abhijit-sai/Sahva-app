@@ -51,6 +51,11 @@ export function getLanguageCode(languageName: string | undefined): string {
       l.nativeName.toLowerCase() === normalized
   );
   if (exact) return exact.code;
+  if (/^[a-z]{2}-[a-z]{2}$/.test(normalized)) {
+    const base = normalized.split("-")[0];
+    const regional = SUPPORTED_LANGUAGES.find(l => l.code.toLowerCase().split("-")[0] === base);
+    if (regional) return regional.code;
+  }
 
   const partial = SUPPORTED_LANGUAGES.find(
     (l) =>

@@ -35,7 +35,7 @@ jobs:
           java-version: 17
       - run: npm ci
       - run: npm run lint
-      - run: node --import tsx --test scripts/auth-configuration.test.mjs
+      - run: node --import tsx --test scripts/auth-configuration.test.mjs scripts/live-source-language.test.mjs
       - run: npm run build
       - run: npx drizzle-kit generate && git diff --exit-code -- drizzle && test -z "$(git ls-files --others --exclude-standard drizzle)"
       - name: Test PostgreSQL migrations and signaling

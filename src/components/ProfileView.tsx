@@ -46,9 +46,9 @@ const MODEL_OPTIONS: Array<{
     id: "auto",
     label: "Auto (Recommended)",
     shortLabel: "Auto",
-    modeNote: "Translation-first with failover",
+    modeNote: "Based on your speaking language",
     description:
-      "Uses the dedicated Gemini 3.5 Live Translate model first, automatically failing over to Gemini 3.8 Live if busy.",
+      "Prioritizes a guided interpreter for English and Indian languages, with automatic failover between live models.",
   },
   {
     id: "gemini-3.5-live-translate-preview",
