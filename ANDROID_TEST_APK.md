@@ -14,6 +14,8 @@ The same command runs on Windows and Linux. GitHub Actions builds an installable
 
 Configure VITE_API_BASE_URL with your deployed HTTPS API and VITE_PUBLIC_WEB_URL with the website before building, or use the first-launch test server field to connect a generic APK to a same-origin deployment. Configure VITE_CLERK_PUBLISHABLE_KEY at build time or on the server. Only public configuration belongs in Vite variables. Set SAHVA_WEB_HOST in the Gradle build environment for verified /oauth-callback links. Publish /.well-known/assetlinks.json on that domain with the app ID app.sahva.mobile and the SHA-256 fingerprint of your signing certificate. The custom scheme works independently.
 
+The website offers the test binary at `/downloads/sahva-test.apk`. On the EC2 deployment, install the verified CI artifact as `/var/lib/sahva/downloads/sahva-test.apk` with mode 0644. Nginx serves this directory through a read-only mount. To host the file elsewhere, set the public build variable `VITE_ANDROID_APK_URL` during the Vite build.
+
 ## Ring a locked phone
 
 1. Launch the APK, sign in, allow microphone and notifications, and finish onboarding. Enable background listening in battery settings if desired. On Android 14 and later enable full-screen notifications for Sahva under Special app access. The ongoing listener notification indicates the service started. Verify its socket by checking deliveredToSockets from the trigger response.

@@ -121,7 +121,7 @@ export default function Session() {
           "POST",
           {},
         );
-        history.replaceState(null, "", "/?room=" + r.roomId);
+        history.replaceState(null, "", "/app?room=" + r.roomId);
       }
       if (alive) M(user);
     })().catch((e) => alive && E(e.message));

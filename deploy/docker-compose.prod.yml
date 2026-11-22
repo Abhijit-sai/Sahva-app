@@ -30,6 +30,7 @@ services:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/certbot:/var/www/certbot:ro
+      - /var/lib/sahva/downloads:/srv/sahva-downloads:ro
     depends_on:
       app:
         condition: service_healthy

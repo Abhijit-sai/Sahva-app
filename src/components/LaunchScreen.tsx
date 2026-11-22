@@ -13,7 +13,7 @@ export async function google(signIn: ReturnType<typeof useSignIn>["signIn"]) {
       redirectUrl: "/sso-callback",
       redirectUrlComplete:
         sessionStorage.getItem("sahva:oauthReturn") ||
-        (location.pathname.startsWith("/join/") ? location.pathname : "/"),
+        (location.pathname.startsWith("/join/") ? location.pathname : "/app"),
     });
     return;
   }

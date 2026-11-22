@@ -1,13 +1,35 @@
-import { StrictMode, useState, useEffect } from "react";
+import { StrictMode, Suspense, lazy, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ClerkProvider } from "@clerk/clerk-react";
+import { ClerkProvider, useAuth } from "@clerk/clerk-react";
 import { Capacitor } from "@capacitor/core";
-import Session from "./components/Session";
+
 import SahvaLogo from "./components/SahvaLogo";
 import { base } from "./lib/runtimeConfig";
 import "./index.css";
 
+const LandingPage = lazy(() => import("./pages/LandingPage"));
+const Session = lazy(() => import("./components/Session"));
+const nativePlatform = Capacitor.isNativePlatform();
+if (
+  !nativePlatform &&
+  location.pathname === "/" &&
+  new URLSearchParams(location.search).has("room")
+) {
+  history.replaceState(
+    history.state,
+    "",
+    "/app" + location.search + location.hash,
+  );
+}
+const showLanding = !nativePlatform && location.pathname === "/";
+function LandingAuth({ update }: { update: (signedIn: boolean) => void }) {
+  const { isSignedIn } = useAuth();
+  useEffect(() => update(Boolean(isSignedIn)), [isSignedIn, update]);
+  return null;
+}
+
 function Bootstrap() {
+  const [signedIn, setSignedIn] = useState(false);
   const [key, setKey] = useState<string>(
       import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || "",
     ),
@@ -29,6 +51,17 @@ function Bootstrap() {
       });
     return () => c.abort();
   }, [key, needsHost]);
+  if (showLanding)
+    return (
+      <>
+        <LandingPage signedIn={signedIn} />
+        {key && (
+          <ClerkProvider publishableKey={key}>
+            <LandingAuth update={setSignedIn} />
+          </ClerkProvider>
+        )}
+      </>
+    );
   if (needsHost)
     return (
       <main className="entry">
@@ -67,7 +100,9 @@ function Bootstrap() {
     return (
       <main className="entry">
         <section className="entry-card">
-          <h1><SahvaLogo /></h1>
+          <h1>
+            <SahvaLogo />
+          </h1>
           <p>{error || "Connecting…"}</p>
           {error && (
             <button
@@ -91,6 +126,8 @@ function Bootstrap() {
 }
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Bootstrap />
+    <Suspense fallback={null}>
+      <Bootstrap />
+    </Suspense>
   </StrictMode>,
 );
