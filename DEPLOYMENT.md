@@ -4,8 +4,16 @@ Use Node 22, PostgreSQL 16 and one running Sahva server. Both WebSocket endpoint
 
 ## AWS resources
 
+For the existing Oregon EC2 deployment, sign in to an AWS CLI profile in the account that owns `sahva-demo`, then run this from the repository root in PowerShell.
+
+```powershell
+.\deploy\setup-ec2-media.ps1 -Profile sahva-deploy
+```
+
+The script provisions the `sahva-demo-media` CloudFormation stack, attaches its instance profile to the existing instance, and configures IMDSv2 for the Docker network. Set the printed `AWS_S3_BUCKET` in the EC2 application's private environment and recreate the app container. The application gets temporary AWS credentials from the role. The stack retains the media bucket if the stack is removed. Its role can read and write voice notes, mixed recordings, and synthesized note audio.
+
 1. For the sahva-demo deployment, use the EC2-hosted database instructions below. For managed PostgreSQL, create an RDS PostgreSQL 16 instance in private subnets with encryption and automated backups. Permit TCP 5432 from the app security group. Create a database and login for Sahva. Set DATABASE_URL, URL-encoding password characters. Install the AWS RDS CA bundle in the container trust store or mount it with NODE_EXTRA_CA_CERTS. Use sslmode=verify-full for certificate and hostname validation.
-2. Create a private, encrypted S3 bucket in the app region with Block Public Access enabled. Grant the EC2 instance profile or ECS task role s3:GetObject and s3:PutObject on recordings/*, voice-notes/*, note-audio/* and avatars/* in that bucket. Configure KMS permissions too if using your own KMS key. Playback uses 15-minute presigned requests.
+2. For manual provisioning, create a private, encrypted S3 bucket in the app region with Block Public Access enabled. Grant the EC2 instance profile or ECS task role `s3:GetObject` and `s3:PutObject` on `recordings/*`, `voice-notes/*`, and `note-audio/*`. Configure KMS permissions if using a customer-managed key. Playback uses 15-minute presigned requests.
 3. Configure bucket CORS. Substitute your origin below. Add a separate rule or origin for local web development as needed.
 
 ```json

@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Private Sahva media for the EC2 application
+Resources:
+  Media:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - https://sahva.madsoul.in
+              - https://localhost
+            AllowedMethods: [GET, HEAD]
+            AllowedHeaders: [Range]
+            ExposedHeaders: [Accept-Ranges, Content-Range, Content-Length, ETag]
+            MaxAge: 600
+  SecureTransport:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Media
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: [!GetAtt Media.Arn, !Sub "${Media.Arn}/*"]
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+  MediaAccess:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SahvaPrivateMedia
+      Roles: [!Ref InstanceRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: [s3:GetObject, s3:PutObject]
+            Resource:
+              - !Sub "${Media.Arn}/voice-notes/*"
+              - !Sub "${Media.Arn}/recordings/*"
+              - !Sub "${Media.Arn}/note-audio/*"
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+Outputs:
+  Bucket:
+    Value: !Ref Media
+  InstanceProfile:
+    Value: !Ref Profile
