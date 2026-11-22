@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Mic, Volume2, Bell, ArrowRight } from "lucide-react";
 import { notificationAccess, enableNotifications } from "../lib/notifications";
 import { bridge, native } from "../lib/runtimeConfig";
+import speakerChime from "../assets/audio/speaker-check.wav";
 
 const checks = [
   { name: "Microphone", icon: Mic },
@@ -44,7 +45,37 @@ export default function DeviceSetup({ finish, busy, name }: {
     setWorking(false); setHeard(false); setMessage(""); setLevel(0); setBlocked(false);
   }
 
-  async function soundCheck(mic: boolean) {
+  function checkSpeaker() {
+    const attempt = ++generation.current;
+    stop.current();
+    setMessage(""); setHeard(false); setWorking(true);
+    const audio = new Audio(speakerChime);
+    const timeout = window.setTimeout(() => finishPlayback(false), 10000);
+    function release() {
+      window.clearTimeout(timeout);
+      audio.onended = null;
+      audio.onerror = null;
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    }
+    function finishPlayback(played: boolean) {
+      if (attempt !== generation.current) return;
+      generation.current++;
+      release();
+      stop.current = () => {};
+      setWorking(false);
+      setHeard(played);
+      setMessage(played ? "Heard the three notes? Confirm below. If it was quiet, check your media volume and connected headphones, then play it again."
+        : "The test sound couldn’t play. Try again or skip for now.");
+    }
+    stop.current = release;
+    audio.onended = () => finishPlayback(true);
+    audio.onerror = () => finishPlayback(false);
+    void audio.play().catch(() => finishPlayback(false));
+  }
+
+  async function checkMicrophone() {
     const attempt = ++generation.current;
     stop.current();
     let ctx: AudioContext | undefined;
@@ -61,18 +92,6 @@ export default function DeviceSetup({ finish, busy, name }: {
       ctx = new AudioContext();
       await ctx.resume();
       if (attempt !== generation.current) return;
-      if (!mic) {
-        const tone = ctx.createOscillator(), gain = ctx.createGain();
-        const now = ctx.currentTime;
-        tone.frequency.setValueAtTime(440, now); tone.frequency.setValueAtTime(554, now + .24);
-        gain.gain.setValueAtTime(.001, now);
-        gain.gain.exponentialRampToValueAtTime(.09, now + .04);
-        gain.gain.exponentialRampToValueAtTime(.001, now + .65);
-        tone.connect(gain).connect(ctx.destination);
-        tone.onended = () => { if (attempt === generation.current) { release(); setWorking(false); setHeard(true); } };
-        tone.start(now); tone.stop(now + .68);
-        return;
-      }
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (attempt !== generation.current) { release(); return; }
       const analyser = ctx.createAnalyser();
@@ -95,10 +114,9 @@ export default function DeviceSetup({ finish, busy, name }: {
       release();
       if (attempt !== generation.current) return;
       setWorking(false);
-      setMessage(mic ? (err instanceof DOMException && err.name === "NotAllowedError"
+      setMessage(err instanceof DOMException && err.name === "NotAllowedError"
         ? "Microphone access is off. You can allow it in settings or try again when you make a call."
-        : "Couldn’t hear your microphone. Check your input and try again.") :
-        "Check your volume or headphones, then play the sound again.");
+        : "Couldn’t hear your microphone. Check your input and try again.");
     }
   }
   async function notifications() {
@@ -131,7 +149,7 @@ export default function DeviceSetup({ finish, busy, name }: {
       {message && <p role="status">{message}</p>}
       {step === 1 && heard && <button type="button" onClick={() => complete(1,"ready")}><Check size={16}/> I heard it</button>}
       {step >= 0 ? <>
-        <button type="button" className={heard ? "secondary" : ""} disabled={working || (blocked && !native)} onClick={() => step === 2 ? void notifications() : void soundCheck(step === 0)}>
+        <button type="button" className={heard ? "secondary" : ""} disabled={working || (blocked && !native)} onClick={step === 0 ? checkMicrophone : step === 1 ? checkSpeaker : notifications}>
           {step === 0 ? working ? "Listening…" : "Check microphone" : step === 1 ? working ? "Playing…" : heard ? "Play again" : "Play test sound" : blocked ? native ? "Open notification settings" : "Allow alerts in site settings" : working ? "Checking…" : "Enable notifications"}
         </button>
         <button type="button" className="setup-link" onClick={() => complete(step,"skipped")}>Skip for now</button>
