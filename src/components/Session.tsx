@@ -4,8 +4,8 @@ import {
   AuthenticateWithRedirectCallback,
   useAuth,
   useClerk,
-  useSignIn,
-} from "@clerk/clerk-react";
+} from "@clerk/react";
+import { useSignIn } from "@clerk/react/legacy";
 import { App as NativeApp } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";

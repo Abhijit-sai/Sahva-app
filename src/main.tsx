@@ -1,6 +1,6 @@
 import { StrictMode, Suspense, lazy, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { ClerkProvider, useAuth } from "@clerk/clerk-react";
+import { ClerkProvider, useAuth } from "@clerk/react";
 import { Capacitor } from "@capacitor/core";
 
 import SahvaLogo from "./components/SahvaLogo";

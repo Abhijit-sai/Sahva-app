@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useSignIn, useSignUp } from "@clerk/clerk-react";
+import { useSignIn, useSignUp } from "@clerk/react/legacy";
 import { Browser } from "@capacitor/browser";
 import { Preferences } from "@capacitor/preferences";
 import { native, webOrigin } from "../lib/runtimeConfig";

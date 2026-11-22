@@ -24,7 +24,7 @@
     "@capacitor/browser": "^6.0.6",
     "@capacitor/core": "^6.2.3",
     "@capacitor/preferences": "^6.0.4",
-    "@clerk/clerk-react": "^5.61.12",
+    "@clerk/react": "^6.19.4",
     "@clerk/express": "^2.1.96",
     "@google/genai": "^3.6.1",
     "dotenv": "^17.2.3",
