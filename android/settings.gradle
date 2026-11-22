@@ -1,3 +1,8 @@
+// Google's Maven Central mirror avoids shared-runner rate limits at Central.
+gradle.beforeProject { project ->
+    project.buildscript.repositories.maven { url 'https://maven-central.storage-download.googleapis.com/maven2/' }
+    project.repositories.maven { url 'https://maven-central.storage-download.googleapis.com/maven2/' }
+}
 include ':app'
 include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
