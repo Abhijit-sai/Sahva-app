@@ -50,6 +50,16 @@ class SahvaCallBridgePlugin : Plugin() {
         audio.isSpeakerphoneOn=call.getBoolean("enabled",true) == true
         call.resolve()
     }
+    @PluginMethod fun downloadRecording(call:PluginCall) {
+        val url=Uri.parse(call.getString("url") ?: return call.reject("Missing recording URL."))
+        if(url.scheme!="https")return call.reject("Invalid recording URL.")
+        val filename="sahva-call-"+System.currentTimeMillis()+".wav"
+        val req=android.app.DownloadManager.Request(url).setTitle(filename).setMimeType("audio/wav")
+            .setDestinationInExternalFilesDir(context,android.os.Environment.DIRECTORY_DOWNLOADS,filename)
+            .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        try{requireNotNull(context.getSystemService(android.app.DownloadManager::class.java)).enqueue(req);call.resolve()}
+        catch(e:Exception){call.reject("Download failed.",e)}
+    }
     @PluginMethod fun requestBatteryOptimizationExemption(call:PluginCall) {
         try {activity.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,Uri.parse("package:"+context.packageName)));call.resolve()}
         catch(e:Exception){call.reject("Battery settings are unavailable.",e)}

@@ -100,6 +100,8 @@ export interface MeetingNoteRecord {
 }
 
 export interface AudioAttachmentMeta {
+  translatedKey?:string;
+  originalKey?:string;
   translatedAudioUrl: string;
   translatedLanguage: string;
   originalAudioUrl: string;

@@ -1,3 +1,4 @@
+import {native,bridge} from "../lib/runtimeConfig";
 import { useState, useRef, useEffect, type FormEvent } from "react";
 import { motion } from "motion/react";
 import {
@@ -115,6 +116,7 @@ export default function CallOverlay({
   onAddManualNote,
   onDismissError,
 }: CallOverlayProps) {
+  const [speaker,setSpeaker]=useState(true);
   const [copiedLink, setCopiedLink] = useState(false);
   const [showAudioPopover, setShowAudioPopover] = useState(false);
   const [quickNote, setQuickNote] = useState("");
@@ -340,7 +342,7 @@ export default function CallOverlay({
             </div>
           )}
 
-          {isOutgoingWaiting && (
+          {isOutgoingWaiting && inviteUrl && (
             <div className="w-full p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3 text-left">
               <p className="text-xs text-slate-300 leading-relaxed">
                 {isCustomRoom
@@ -800,6 +802,7 @@ export default function CallOverlay({
 
       {/* Bottom Locked Call Controls Bar */}
       <footer className="px-4 sm:px-6 py-3.5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2.5 sm:gap-3.5 shrink-0">
+        {native&&<button className="rounded-full border px-3 py-2" aria-pressed={speaker} onClick={()=>bridge.setSpeakerphone({enabled:!speaker}).then(()=>setSpeaker(!speaker))}>{speaker?"Speaker on":"Earpiece"}</button>}
         <button
           type="button"
           onClick={onToggleMute}

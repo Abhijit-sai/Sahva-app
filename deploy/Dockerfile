@@ -5,7 +5,6 @@ RUN npm ci
 COPY . .
 ARG VITE_API_BASE_URL
 ARG VITE_PUBLIC_WEB_URL
-ARG VITE_CLERK_PUBLISHABLE_KEY
 RUN npm run lint && npm run build && npm prune --omit=dev
 
 FROM node:22-bookworm-slim

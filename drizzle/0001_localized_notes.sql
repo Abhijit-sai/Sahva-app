@@ -1,0 +1,1 @@
+ALTER TABLE "meeting_notes" ADD COLUMN "localizations_json" jsonb DEFAULT '{}'::jsonb NOT NULL;

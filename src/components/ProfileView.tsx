@@ -1,3 +1,4 @@
+import {useUser} from "@clerk/clerk-react";
 import { useState, useEffect } from "react";
 import {
   Sun,
@@ -82,6 +83,8 @@ export default function ProfileView({
   );
 
   // Explicit Save state for Display Name & Email text fields
+  const {user}=useUser();
+  const [addressId,setAddressId]=useState(""),[code,setCode]=useState(""),[emailError,setEmailError]=useState(""),[saving,setSaving]=useState(false);
   const [draftName, setDraftName] = useState(profile.name);
   const [draftEmail, setDraftEmail] = useState(profile.email);
   const [savedFeedback, setSavedFeedback] = useState(false);
@@ -98,16 +101,28 @@ export default function ProfileView({
     const cleanName = draftName.trim();
     const cleanEmail = draftEmail.trim();
     if (!cleanName) return;
-    const saved=await onUpdateProfile({
-      name: cleanName,
-      email: cleanEmail || profile.email,
-    });
-    if(!saved)return;
-    setSavedFeedback(true);
-    setTimeout(() => setSavedFeedback(false), 2200);
+    if(saving || !user)return;
+    setSaving(true);setEmailError("");
+    try{
+      if(cleanEmail && cleanEmail.toLowerCase()!==profile.email.toLowerCase()){
+        let address=user.emailAddresses.find(e=>e.emailAddress.toLowerCase()===cleanEmail.toLowerCase());
+        address??=await user.createEmailAddress({email:cleanEmail});
+        if(address.verification.status!=="verified"){
+          if(addressId!==address.id){
+            await address.prepareVerification({strategy:"email_code"});setAddressId(address.id);return;
+          }
+          address=await address.attemptVerification({code});
+          if(address.verification.status!=="verified")throw Error("Enter the six-digit verification code.");
+        }
+        await user.update({primaryEmailAddressId:address.id});
+      }
+      const saved=await onUpdateProfile({name:cleanName,email:cleanEmail||profile.email});
+      if(saved){setAddressId("");setCode("");setSavedFeedback(true);setTimeout(()=>setSavedFeedback(false),2200)}
+    }catch(e:any){setEmailError(e.errors?.[0]?.longMessage||e.message)}finally{setSaving(false)}
   };
 
   const handleCancelDetails = () => {
+    setAddressId("");setCode("");setEmailError("");
     setDraftName(profile.name);
     setDraftEmail(profile.email);
   };
@@ -190,12 +205,14 @@ export default function ProfileView({
                   id="profile-email"
                   type="email"
                   value={draftEmail}
-                  onChange={(e) => setDraftEmail(e.target.value)}
+                  onChange={e=>{setDraftEmail(e.target.value);setAddressId("");setCode("")}}
                   className="w-full h-9 px-3 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
             </div>
 
+            {addressId&&<label className="block text-sm">Verification code for {draftEmail}<input className="w-full border rounded p-2" autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={code} onChange={e=>setCode(e.target.value)}/></label>}
+            {emailError&&<p role="alert" className="text-sm text-red-700">{emailError}</p>}
             {isDirty && (
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -208,7 +225,7 @@ export default function ProfileView({
                 <button
                   type="button"
                   onClick={handleSaveDetails}
-                  disabled={!draftName.trim()}
+                  disabled={!draftName.trim() || saving || Boolean(addressId&&code.length!==6)}
                   className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500 disabled:opacity-50 rounded-lg transition-colors"
                 >
                   <Check className="w-3.5 h-3.5" />

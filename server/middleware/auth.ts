@@ -6,39 +6,104 @@ import { db } from "../../src/db";
 import { users, type User } from "../../src/db/schema";
 
 export class HttpError extends Error {
-  constructor(public status:number, message:string) { super(message); }
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
 }
-export const route = (handler:(req:Request,res:Response,next:NextFunction)=>Promise<unknown>):RequestHandler =>
-  (req,res,next)=>{void handler(req,res,next).catch(next)};
-export const origins = () => [process.env.PUBLIC_WEB_URL, "https://localhost", ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000","http://127.0.0.1:3000"])].filter(Boolean).map(value=>new URL(value!).origin);
-export async function authenticate(token:string) {
-  if (!token) throw new HttpError(401,"Sign in to Sahva.");
-  const claims = await verifyToken(token,{secretKey:process.env.CLERK_SECRET_KEY,authorizedParties:origins()}).catch(()=>{throw new HttpError(401,"Your session has expired.")});
-  if (!claims.sub || !claims.sid) throw new HttpError(401,"A user session is required.");
-  const [existing] = await db.select().from(users).where(eq(users.clerkUserId,claims.sub));
+export const route =
+  (
+    handler: (
+      req: Request,
+      res: Response,
+      next: NextFunction,
+    ) => Promise<unknown>,
+  ): RequestHandler =>
+  (req, res, next) => {
+    void handler(req, res, next).catch(next);
+  };
+export const origins = () =>
+  [
+    process.env.PUBLIC_WEB_URL,
+    "https://localhost",
+    ...(process.env.NODE_ENV === "production"
+      ? []
+      : ["http://localhost:3000", "http://127.0.0.1:3000"]),
+  ]
+    .filter(Boolean)
+    .map((value) => new URL(value!).origin);
+export async function authenticate(token: string) {
+  if (!token) throw new HttpError(401, "Sign in to Sahva.");
+  const claims = await verifyToken(token, {
+    secretKey: process.env.CLERK_SECRET_KEY,
+    jwtKey: process.env.CLERK_JWT_KEY,
+    authorizedParties: origins(),
+  }).catch(() => {
+    throw new HttpError(401, "Your session has expired.");
+  });
+  if (!claims.sub || !claims.sid)
+    throw new HttpError(401, "A user session is required.");
+  const [existing] = await db
+    .select()
+    .from(users)
+    .where(eq(users.clerkUserId, claims.sub));
   if (existing) {
-    if (Date.now()-existing.lastSeenAt.getTime()>60000) await db.update(users).set({lastSeenAt:new Date()}).where(eq(users.id,existing.id));
+    if (Date.now() - existing.lastSeenAt.getTime() > 60000)
+      await db
+        .update(users)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(users.id, existing.id));
     return existing;
   }
   const account = await clerkClient.users.getUser(claims.sub);
-  const primary = account.emailAddresses.find(e=>e.id===account.primaryEmailAddressId && e.verification?.status==="verified");
-  if (!primary) throw new HttpError(403,"Verify your email address in Clerk.");
-  const [user] = await db.insert(users).values({clerkUserId:account.id,email:primary.emailAddress.toLowerCase(),displayName:[account.firstName,account.lastName].filter(Boolean).join(" ") || primary.emailAddress.split("@")[0],avatarUrl:account.imageUrl}).onConflictDoUpdate({target:users.clerkUserId,set:{lastSeenAt:new Date()}}).returning();
+  const primary = account.emailAddresses.find(
+    (e) =>
+      e.id === account.primaryEmailAddressId &&
+      e.verification?.status === "verified",
+  );
+  if (!primary) throw new HttpError(403, "Verify your email address in Clerk.");
+  const [user] = await db
+    .insert(users)
+    .values({
+      clerkUserId: account.id,
+      email: primary.emailAddress.toLowerCase(),
+      displayName:
+        [account.firstName, account.lastName].filter(Boolean).join(" ") ||
+        primary.emailAddress.split("@")[0],
+      avatarUrl: account.imageUrl,
+    })
+    .onConflictDoUpdate({
+      target: users.clerkUserId,
+      set: { lastSeenAt: new Date() },
+    })
+    .returning();
   return user;
 }
-export const auth = route(async(req,res,next)=>{
+export const auth = route(async (req, res, next) => {
   const key = process.env.INTERNAL_CALL_API_KEY;
-  const hash = (s:string)=>createHash("sha256").update(s).digest();
-  if (req.method==="POST" && req.path==="/calls/ring" && key && timingSafeEqual(hash(req.get("x-internal-call-key") || ""),hash(key))) {
+  const hash = (s: string) => createHash("sha256").update(s).digest();
+  if (
+    req.method === "POST" &&
+    req.path === "/calls/ring" &&
+    key &&
+    timingSafeEqual(hash(req.get("x-internal-call-key") || ""), hash(key))
+  ) {
     res.locals.internal = true;
   } else {
-    res.locals.user = await authenticate(req.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1] || "");
+    res.locals.user = await authenticate(
+      req.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1] || "",
+    );
   }
   next();
 });
-export const currentUser = (res:Response):User => res.locals.user;
-export function uuid(value:unknown):string {
-  if(typeof value!=="string" || !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(value)) throw new HttpError(400,"Invalid identifier.");
+export const currentUser = (res: Response): User => res.locals.user;
+export function uuid(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(value)
+  )
+    throw new HttpError(400, "Invalid identifier.");
   return value;
 }
-

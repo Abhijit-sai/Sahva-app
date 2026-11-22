@@ -1,11 +1,36 @@
+import { MixedRecording } from "./server/services/recording";
 import { nativeAuth } from "./server/nativeAuth";
-import { attachUserSocket, signalApi, startSignaling, sendUser } from "./server/services/callSignaling";
+import {
+  attachUserSocket,
+  signalApi,
+  startSignaling,
+  sendUser,
+} from "./server/services/callSignaling";
 import { api } from "./server/api";
-import { auth, authenticate, currentUser, origins, route, HttpError } from "./server/middleware/auth";
-import { membership, members, history, noteList, saveMessage } from "./server/services/repository";
+import {
+  auth,
+  authenticate,
+  currentUser,
+  origins,
+  route,
+  HttpError,
+} from "./server/middleware/auth";
+import {
+  membership,
+  members,
+  history,
+  noteList,
+  saveMessage,
+} from "./server/services/repository";
 import { db } from "./src/db";
-import { calls, rings, notes as noteRows, tasks, messages as messageRows } from "./src/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import {
+  calls,
+  rings,
+  notes as noteRows,
+  tasks,
+  messages as messageRows,
+} from "./src/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { uploadMedia, mediaUrl } from "./server/services/s3";
 import express from "express";
 import path from "path";
@@ -32,19 +57,31 @@ dotenv.config();
 
 const app = express();
 app.disable("x-powered-by");
-app.get("/public-config",(req,res)=>{
-  if(req.headers.origin && origins().includes(req.headers.origin)){res.set("Access-Control-Allow-Origin",req.headers.origin);res.vary("Origin")}
-  res.set("Cache-Control","no-store").json({publishableKey:process.env.VITE_CLERK_PUBLISHABLE_KEY||""});
+app.get("/public-config", (req, res) => {
+  if (req.headers.origin && origins().includes(req.headers.origin)) {
+    res.set("Access-Control-Allow-Origin", req.headers.origin);
+    res.vary("Origin");
+  }
+  res
+    .set("Cache-Control", "no-store")
+    .json({ publishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || "" });
 });
-app.get("/healthz", (_req,res)=>res.json({ok:true}));
-app.use("/api",(req,res,next)=>{
-  const origin=req.headers.origin;
-  if(origin && !origins().includes(origin)) return res.status(403).end();
-  if(origin) {res.set("Access-Control-Allow-Origin",origin);res.vary("Origin");}
-  if(req.method==="OPTIONS"){res.set("Access-Control-Allow-Headers","Authorization, Content-Type");res.set("Access-Control-Allow-Methods","GET,POST,PATCH,OPTIONS");return res.sendStatus(204);}
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
+app.use("/api", (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && !origins().includes(origin)) return res.status(403).end();
+  if (origin) {
+    res.set("Access-Control-Allow-Origin", origin);
+    res.vary("Origin");
+  }
+  if (req.method === "OPTIONS") {
+    res.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.set("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
+    return res.sendStatus(204);
+  }
   next();
 });
-app.use("/api",auth);
+app.use("/api", auth);
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
@@ -77,18 +114,35 @@ app.use((req, _res, next) => {
 });
 
 nativeAuth(app);
-app.use("/api",api);
-app.use("/api/calls",signalApi);
-app.use(["/api/chat","/api/notes/generate","/api/notes/localize","/api/notes/audio"],route(async(req,res,next)=>{
-  const user=currentUser(res);
-  res.locals.room=await membership(user.id,String(req.body.roomId || ""));
-  Object.assign(req.body,{senderId:user.id,senderName:user.displayName,sourceLanguage:user.preferredLanguageName,voiceTone:user.voiceTone});
-  next();
-}));
+app.use("/api", api);
+app.use("/api/calls", signalApi);
+app.use(
+  [
+    "/api/chat",
+    "/api/notes/generate",
+    "/api/notes/localize",
+    "/api/notes/audio",
+  ],
+  route(async (req, res, next) => {
+    const user = currentUser(res);
+    res.locals.room = await membership(user.id, String(req.body.roomId || ""));
+    Object.assign(req.body, {
+      senderId: user.id,
+      senderName: user.displayName,
+      sourceLanguage: user.preferredLanguageName,
+      voiceTone: user.voiceTone,
+    });
+    next();
+  }),
+);
 
 function getGeminiApiKey(): string {
   const raw = (process.env.GEMINI_API_KEY || "").trim();
-  if (!raw || raw.includes("MY_GEMINI_API_KEY") || raw.includes("placeholder")) {
+  if (
+    !raw ||
+    raw.includes("MY_GEMINI_API_KEY") ||
+    raw.includes("placeholder")
+  ) {
     return "";
   }
   return raw;
@@ -98,7 +152,7 @@ function createGeminiClient(apiVersion: string = "v1beta"): GoogleGenAI {
   const apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error(
-      "Gemini API key is not configured. Please verify GEMINI_API_KEY in Settings > Secrets."
+      "Gemini API key is not configured. Please verify GEMINI_API_KEY in Settings > Secrets.",
     );
   }
   return new GoogleGenAI({
@@ -150,11 +204,6 @@ interface ParticipantSlot {
   turnFlushTimer: ReturnType<typeof setTimeout> | null;
 }
 
-interface CallRecordingChunk {
-  offsetMs: number;
-  pcm16k: Buffer;
-}
-
 interface CallRoom {
   roomId: string;
   roomTitle: string;
@@ -166,83 +215,58 @@ interface CallRoom {
   callId: string | null;
   callStartedAt: string | null;
   callStartEpochMs: number | null;
-  recordingChunks: CallRecordingChunk[];
-  lastRecordingUrl: string | null;
+  recording: MixedRecording | null;
   transcripts: TranscriptEntry[];
-  messages: ChatMessage[];
-  notes: MeetingNoteRecord[];
   lastActivityAt: number;
 }
-
-const MAX_RECORDING_MS = 15 * 60 * 1000;
 
 function getPrebuiltVoiceForTone(voiceTone: VoiceTone): string {
   return voiceTone === "male" ? "Charon" : "Kore";
 }
 
-function buildMixedCallWavBuffer(chunks: CallRecordingChunk[]): Buffer | null {
-  if (!chunks || chunks.length === 0) return null;
-  const sampleRate = 16000;
-  let totalSamples = 0;
-
-  for (const ch of chunks) {
-    const startSample = Math.floor((Math.max(0, ch.offsetMs) / 1000) * sampleRate);
-    const numSamples = Math.floor(ch.pcm16k.length / 2);
-    const endSample = startSample + numSamples;
-    if (endSample > totalSamples) totalSamples = endSample;
-  }
-
-  // Cap at 15 minutes (14.4M samples -> ~28.8MB WAV)
-  const maxSamples = Math.floor((MAX_RECORDING_MS / 1000) * sampleRate);
-  totalSamples = Math.min(totalSamples, maxSamples);
-  if (totalSamples < 1600) return null; // Less than 0.1s of audio
-
-  const mixed = new Int32Array(totalSamples);
-  for (const ch of chunks) {
-    const startSample = Math.floor((Math.max(0, ch.offsetMs) / 1000) * sampleRate);
-    const numSamples = Math.floor(ch.pcm16k.length / 2);
-    for (let i = 0; i < numSamples; i++) {
-      const idx = startSample + i;
-      if (idx >= totalSamples) break;
-      mixed[idx] += ch.pcm16k.readInt16LE(i * 2);
-    }
-  }
-
-  const dataByteLength = totalSamples * 2;
-  const wav = Buffer.alloc(44 + dataByteLength);
-  wav.write("RIFF", 0);
-  wav.writeUInt32LE(36 + dataByteLength, 4);
-  wav.write("WAVE", 8);
-  wav.write("fmt ", 12);
-  wav.writeUInt32LE(16, 16); // PCM header length
-  wav.writeUInt16LE(1, 20); // PCM format
-  wav.writeUInt16LE(1, 22); // Mono
-  wav.writeUInt32LE(sampleRate, 24);
-  wav.writeUInt32LE(sampleRate * 2, 28); // Byte rate
-  wav.writeUInt16LE(2, 32); // Block align
-  wav.writeUInt16LE(16, 34); // Bits per sample
-  wav.write("data", 36);
-  wav.writeUInt32LE(dataByteLength, 40);
-
-  for (let i = 0; i < totalSamples; i++) {
-    const clamped = Math.max(-32768, Math.min(32767, mixed[i]));
-    wav.writeInt16LE(clamped, 44 + i * 2);
-  }
-  return wav;
-}
-
-async function finishCall(room:CallRoom, conversationId:string) {
-  const id=room.callId;
-  if(!id)return;
-  const wav=buildMixedCallWavBuffer(room.recordingChunks);
-  const transcript=[...room.transcripts];
-  const durationSec=Math.max(0,Math.round((Date.now()-(room.callStartEpochMs||Date.now()))/1000));
-  const key=wav?await uploadMedia("recordings/"+id+"/mixed.wav",wav,"audio/wav"):null;
-  const [ended]=await db.update(calls).set({status:"ended",endedAt:new Date(),durationSec,recordingS3Key:key,transcriptJson:transcript}).where(and(eq(calls.id,id),eq(calls.status,"active"))).returning();
-  if(ended){
-    const pending=await db.update(rings).set({status:"cancelled",updatedAt:new Date()}).where(and(eq(rings.callSessionId,id),inArray(rings.status,["ringing","delivered"]))).returning();
-    for(const r of pending)sendUser(r.targetUserId,{type:"call:cancelled",callSessionId:id});
-    await persistNotes(room,conversationId,ended);
+async function finishCall(room: CallRoom, conversationId: string) {
+  const id = room.callId;
+  if (!id) return;
+  const recording = room.recording;
+  room.recording = null;
+  const transcript = [...room.transcripts];
+  const durationSec = Math.max(
+    0,
+    Math.round((Date.now() - (room.callStartEpochMs || Date.now())) / 1000),
+  );
+  const key = recording
+    ? await recording.upload(id).catch((e) => {
+        console.error("Recording upload failed", e.name);
+        return null;
+      })
+    : null;
+  const [ended] = await db
+    .update(calls)
+    .set({
+      status: "ended",
+      endedAt: new Date(),
+      durationSec,
+      recordingS3Key: key,
+      transcriptJson: transcript,
+    })
+    .where(and(eq(calls.id, id), eq(calls.status, "active")))
+    .returning();
+  if (ended) {
+    for (const u of ended.participantSnapshotJson)
+      sendUser(u.id, { type: "workspace:changed", roomId: room.roomId });
+    const pending = await db
+      .update(rings)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(
+        and(
+          eq(rings.callSessionId, id),
+          inArray(rings.status, ["ringing", "delivered"]),
+        ),
+      )
+      .returning();
+    for (const r of pending)
+      sendUser(r.targetUserId, { type: "call:cancelled", callSessionId: id });
+    await persistNotes(room, conversationId, ended);
   }
 }
 
@@ -254,7 +278,7 @@ function createParticipantSlot(
   name: string,
   language: string,
   preferredModel: TranslationModelPreference = "auto",
-  voiceTone: VoiceTone = "female"
+  voiceTone: VoiceTone = "female",
 ): ParticipantSlot {
   return {
     id,
@@ -286,19 +310,19 @@ function getOrCreateRoom(roomId: string, roomTitle?: string): CallRoom {
     return existing;
   }
 
-  const room:CallRoom={
-    roomId:sanitizedId,roomTitle:roomTitle||sanitizedId,isCustomRoom:false,
+  const room: CallRoom = {
+    roomId: sanitizedId,
+    roomTitle: roomTitle || sanitizedId,
+    isCustomRoom: false,
     participants: new Map(),
     callPhase: "idle",
     callerId: null,
     callId: null,
     callStartedAt: null,
     callStartEpochMs: null,
-    recordingChunks: [],
-    lastRecordingUrl: null,
+    recording: null,
     transcripts: [],
-    messages: [],
-    notes: [],
+
     lastActivityAt: Date.now(),
   };
 
@@ -333,13 +357,11 @@ function serializeParticipant(slot: ParticipantSlot): ParticipantInfo {
 }
 
 function getConnectedParticipants(room: CallRoom): ParticipantInfo[] {
-  const list: ParticipantInfo[] = [];
-  for (const slot of room.participants.values()) {
-    if (isSlotConnected(slot) || slot.inCall) {
-      list.push(serializeParticipant(slot));
-    }
+  const connected=new Map<string,ParticipantInfo>();
+  for(const slot of room.participants.values()){
+    if(isSlotConnected(slot) && (!connected.has(slot.id)||slot.inCall))connected.set(slot.id,serializeParticipant(slot));
   }
-  return list;
+  return [...connected.values()];
 }
 
 function getInCallSlots(room: CallRoom): ParticipantSlot[] {
@@ -364,8 +386,8 @@ function buildRoomSnapshot(room: CallRoom): RoomSnapshot {
     callId: room.callId,
     callStartedAt: room.callStartedAt,
     transcripts: room.transcripts.slice(-200),
-    messages: room.messages.slice(-150),
-    notes: room.notes.slice(-30),
+    messages: [],
+    notes: [],
   };
 }
 
@@ -412,12 +434,10 @@ function flushParticipantTurn(room: CallRoom, slot: ParticipantSlot) {
   }
 
   const translationEntries = Object.entries(translations).filter(
-    ([lang]) => !areSameLanguage(lang, slot.language)
+    ([lang]) => !areSameLanguage(lang, slot.language),
   );
-  const primaryTargetLang =
-    translationEntries[0]?.[0] || slot.language;
-  const primaryTranslatedText =
-    translationEntries[0]?.[1] || orig;
+  const primaryTargetLang = translationEntries[0]?.[0] || slot.language;
+  const primaryTranslatedText = translationEntries[0]?.[1] || orig;
 
   slot.pendingTurnOriginal = "";
   slot.pendingTurnTranslations = {};
@@ -534,7 +554,10 @@ async function generateTextWithResilience(options: {
     if (step.delayMs > 0) await sleep(step.delayMs);
     try {
       const activeConfig = options.config ? { ...options.config } : undefined;
-      if (activeConfig?.thinkingConfig && step.model === "gemini-3.1-flash-lite") {
+      if (
+        activeConfig?.thinkingConfig &&
+        step.model === "gemini-3.1-flash-lite"
+      ) {
         delete activeConfig.thinkingConfig;
       }
       const response = await ai.models.generateContent({
@@ -558,11 +581,13 @@ async function generateTextWithResilience(options: {
         }
       }
       console.warn(
-        `[Gemini Text] ${step.model} failed (${formatReadableGeminiError(err)}), trying next attempt...`
+        `[Gemini Text] ${step.model} failed (${formatReadableGeminiError(err)}), trying next attempt...`,
       );
     }
   }
-  throw lastErr || new Error("Gemini text generation is temporarily unavailable.");
+  throw (
+    lastErr || new Error("Gemini text generation is temporarily unavailable.")
+  );
 }
 
 async function openLiveSessionWithHandshake(
@@ -573,7 +598,7 @@ async function openLiveSessionWithHandshake(
     onmessage: (msg: any) => void;
     onerror: (err: any) => void;
     onclose: (event?: any) => void;
-  }
+  },
 ): Promise<any> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -636,8 +661,9 @@ async function openLiveSessionWithHandshake(
               cleanupTimers();
               reject(
                 new Error(
-                  ev?.reason || `Connection closed during handshake (${ev?.code || "closed"})`
-                )
+                  ev?.reason ||
+                    `Connection closed during handshake (${ev?.code || "closed"})`,
+                ),
               );
               return;
             }
@@ -680,7 +706,7 @@ async function connectGeminiTranslateSession(
     onmessage: (msg: any) => void;
     onerror: (err: any) => void;
     onclose: (event?: any) => void;
-  }
+  },
 ) {
   // @google/genai >= 3.x defaults to apiVersion "v1", which returns 404 on BidiGenerateContent.
   // Explicitly target v1alpha / v1beta for Live API sessions.
@@ -716,7 +742,7 @@ async function connectGeminiTranslateSession(
 
   const translateConfigBasic: any = {
     responseModalities: [Modality.AUDIO],
-    inputAudioTranscription: {},
+    inputAudioTranscription: { languageCodes: [sourceLangCode] },
     outputAudioTranscription: {},
     translationConfig: {
       targetLanguageCode: targetLangCode,
@@ -745,7 +771,7 @@ async function connectGeminiTranslateSession(
     speechConfig: {
       voiceConfig: { prebuiltVoiceConfig: { voiceName } },
     },
-    inputAudioTranscription: {},
+    inputAudioTranscription: { languageCodes: [sourceLangCode] },
     outputAudioTranscription: {},
     systemInstruction: interpreterInstruction,
   };
@@ -831,10 +857,10 @@ async function connectGeminiTranslateSession(
         client,
         candidate.model,
         candidate.config,
-        callbacks
+        callbacks,
       );
       console.log(
-        `[Live Translate] Connected ${candidate.model} (${candidate.apiVersion}) (${sourceLangName}[${sourceLangCode}] -> ${targetLangName}[${targetLangCode}], voice=${voiceName})`
+        `[Live Translate] Connected ${candidate.model} (${candidate.apiVersion}) (${sourceLangName}[${sourceLangCode}] -> ${targetLangName}[${targetLangCode}], voice=${voiceName})`,
       );
       return session;
     } catch (err: any) {
@@ -844,7 +870,7 @@ async function connectGeminiTranslateSession(
         throw err;
       }
       console.warn(
-        `[Live Translate] ${candidate.model} (${candidate.apiVersion}) failed: ${formatReadableGeminiError(err)}`
+        `[Live Translate] ${candidate.model} (${candidate.apiVersion}) failed: ${formatReadableGeminiError(err)}`,
       );
     }
   }
@@ -855,7 +881,7 @@ async function connectGeminiTranslateSession(
 async function ensureTranslatorForLanguage(
   room: CallRoom,
   speakerSlot: ParticipantSlot,
-  targetLanguage: string
+  targetLanguage: string,
 ) {
   if (!speakerSlot.inCall || room.callPhase !== "active") return;
   const targetLangCode = getLanguageCode(targetLanguage);
@@ -953,7 +979,8 @@ async function ensureTranslatorForLanguage(
             captionUpdated = true;
           }
           if (content.outputTranscription?.text) {
-            translator.pendingTranslatedText += content.outputTranscription.text;
+            translator.pendingTranslatedText +=
+              content.outputTranscription.text;
             speakerSlot.pendingTurnTranslations[targetLanguage] =
               translator.pendingTranslatedText;
             captionUpdated = true;
@@ -973,7 +1000,8 @@ async function ensureTranslatorForLanguage(
                 translatedText: translator.pendingTranslatedText.trim(),
                 translations: {
                   ...speakerSlot.pendingTurnTranslations,
-                  [speakerSlot.language]: speakerSlot.pendingTurnOriginal.trim(),
+                  [speakerSlot.language]:
+                    speakerSlot.pendingTurnOriginal.trim(),
                 },
                 updatedAt: Date.now(),
               },
@@ -1008,9 +1036,11 @@ async function ensureTranslatorForLanguage(
         onerror: (err: any) => {
           console.error(
             `[Live Translate] Error on ${speakerSlot.name} -> ${targetLanguage}:`,
-            err
+            err,
           );
-          if (speakerSlot.translatorsByLang.get(targetLangCode) === translator) {
+          if (
+            speakerSlot.translatorsByLang.get(targetLangCode) === translator
+          ) {
             translator.ready = false;
             translator.connecting = false;
           }
@@ -1024,14 +1054,16 @@ async function ensureTranslatorForLanguage(
           broadcastPresence(room);
         },
         onclose: () => {
-          if (speakerSlot.translatorsByLang.get(targetLangCode) === translator) {
+          if (
+            speakerSlot.translatorsByLang.get(targetLangCode) === translator
+          ) {
             translator.liveSession = null;
             translator.ready = false;
             translator.connecting = false;
             broadcastPresence(room);
           }
         },
-      }
+      },
     );
 
     if (
@@ -1066,7 +1098,7 @@ async function ensureTranslatorForLanguage(
     const readable = formatReadableGeminiError(err);
     console.error(
       `[Live Translate] Failed ${speakerSlot.name} -> ${targetLanguage}:`,
-      readable
+      readable,
     );
     broadcastRoom(room, {
       type: "call:error",
@@ -1125,7 +1157,7 @@ async function syncAllCallTranslators(room: CallRoom) {
 async function translateChatText(
   text: string,
   sourceLanguage: string,
-  targetLanguage: string
+  targetLanguage: string,
 ): Promise<string> {
   if (!text.trim() || areSameLanguage(sourceLanguage, targetLanguage)) {
     return text;
@@ -1162,7 +1194,14 @@ const LOCALIZED_NOTE_SCHEMA = {
           priority: { type: Type.STRING },
           rationale: { type: Type.STRING },
         },
-        required: ["id", "title", "owner", "timeframe", "priority", "rationale"],
+        required: [
+          "id",
+          "title",
+          "owner",
+          "timeframe",
+          "priority",
+          "rationale",
+        ],
       },
     },
     todos: {
@@ -1204,21 +1243,21 @@ async function generateLocalizedMeetingNote(params: {
         `[${t.timestamp}] ${t.speakerName} (${t.sourceLanguage}): "${t.originalText}"` +
         (t.translatedText && t.translatedText !== t.originalText
           ? ` -> (${t.targetLanguage}): "${t.translatedText}"`
-          : "")
+          : ""),
     )
     .join("\n");
 
   const chatLines = params.recentChat
     .filter((m) => m.kind === "text" || m.kind === "audio")
     .slice(-15)
-    .map(
-      (m) =>
-        `- ${m.senderName} (${m.sourceLanguage}): ${m.originalText}`
-    )
+    .map((m) => `- ${m.senderName} (${m.sourceLanguage}): ${m.originalText}`)
     .join("\n");
 
   const participantList = params.participants
-    .map((p, idx) => `- Speaker ${idx + 1}: ${p.name} (Preferred language: ${p.language})`)
+    .map(
+      (p, idx) =>
+        `- Speaker ${idx + 1}: ${p.name} (Preferred language: ${p.language})`,
+    )
     .join("\n");
 
   const speakerNames = params.participants.map((p) => p.name).join(", ");
@@ -1276,8 +1315,7 @@ ${transcriptLines || "(Short call or chat summary — synthesize constructively 
 
   const normalizedTodos = Array.isArray(parsed.todos)
     ? parsed.todos.map((td: any, i: number) => ({
-        id:
-          params.canonicalTodoIds?.[i] || String(td.id || `todo-${i + 1}`),
+        id: params.canonicalTodoIds?.[i] || String(td.id || `todo-${i + 1}`),
         task: String(td.task || ""),
         assignee: String(td.assignee || defaultOwner),
         dueHint: String(td.dueHint || "Next check-in"),
@@ -1312,7 +1350,7 @@ app.get("/api/health", (_req, res) => {
 async function transcribeRecordedAudio(
   base64Audio: string,
   mimeType: string,
-  sourceLanguage: string
+  sourceLanguage: string,
 ): Promise<string> {
   const ai = createGeminiClient("v1beta");
   const cleanMime = mimeType.split(";")[0].trim() || "audio/webm";
@@ -1352,7 +1390,7 @@ async function transcribeRecordedAudio(
         throw err;
       }
       console.warn(
-        `[Voice Note Transcribe] ${models[i]} failed (${formatReadableGeminiError(err)}), trying next...`
+        `[Voice Note Transcribe] ${models[i]} failed (${formatReadableGeminiError(err)}), trying next...`,
       );
     }
   }
@@ -1362,7 +1400,7 @@ async function transcribeRecordedAudio(
 async function synthesizeTranslatedVoiceNote(
   text: string,
   targetLanguage: string,
-  voiceName: string
+  voiceName: string,
 ): Promise<Buffer> {
   let lastErr: any = null;
   const attempts: Array<{
@@ -1441,7 +1479,7 @@ async function synthesizeTranslatedVoiceNote(
         throw err;
       }
       console.warn(
-        `[Voice Note TTS] ${step.model} (${step.apiVersion}, meta=${step.includeSpeechMetadata}) failed (${formatReadableGeminiError(err)}), trying next...`
+        `[Voice Note TTS] ${step.model} (${step.apiVersion}, meta=${step.includeSpeechMetadata}) failed (${formatReadableGeminiError(err)}), trying next...`,
       );
     }
   }
@@ -1452,7 +1490,7 @@ function collectRoomTargetLanguages(
   room: CallRoom,
   senderId: string,
   senderLanguage: string,
-  fallbackTargetLanguage?: string
+  fallbackTargetLanguage?: string,
 ): string[] {
   const langs: string[] = [];
   const addLang = (l?: string) => {
@@ -1493,7 +1531,7 @@ app.post("/api/chat/voice-note", async (req, res) => {
       return res.status(400).json({ error: "Missing recorded audio payload." });
     }
 
-    const room = getOrCreateRoom(String(roomId || "call-hyderabad-sync"));
+    const room = rooms.get(res.locals.room.roomKey);
     const role: SpeakerRole =
       String(senderRole).toUpperCase() === "B" ? "B" : "A";
     const effectiveSourceLang = String(sourceLanguage || "English");
@@ -1501,24 +1539,41 @@ app.post("/api/chat/voice-note", async (req, res) => {
     const effectiveVoiceTone: VoiceTone =
       voiceTone === "male" ? "male" : "female";
 
-    const targetLangs = [...new Set((await members(res.locals.room.id)).filter(u=>u.id!==senderId).map(u=>u.preferredLanguageName))];
+    const recipients = await members(res.locals.room.id);
+    const targetLangs = [
+      ...new Set(
+        recipients
+          .filter((u) => u.id !== senderId)
+          .map((u) => u.preferredLanguageName),
+      ),
+    ];
     const primaryTargetLang = targetLangs[0] || effectiveSourceLang;
 
     // 1. Save original recorded audio file
     const cleanMime = String(mimeType).split(";")[0].trim() || "audio/webm";
     const originalBuf = Buffer.from(audioBase64, "base64");
-    const id=crypto.randomUUID();
-    const ext:Record<string,string>={"audio/webm":"webm","audio/wav":"wav","audio/mp4":"m4a","audio/ogg":"ogg"};
-    if(!ext[cleanMime])return res.status(400).json({error:"Unsupported recording format."});
-    const prefix="voice-notes/"+res.locals.room.id+"/"+id+"/";
-    const originalKey=await uploadMedia(prefix+"original."+ext[cleanMime],originalBuf,cleanMime);
-    const originalAudioUrl=await mediaUrl(originalKey);
+    const id = crypto.randomUUID();
+    const ext: Record<string, string> = {
+      "audio/webm": "webm",
+      "audio/wav": "wav",
+      "audio/mp4": "m4a",
+      "audio/ogg": "ogg",
+    };
+    if (!ext[cleanMime])
+      return res.status(400).json({ error: "Unsupported recording format." });
+    const prefix = "voice-notes/" + res.locals.room.id + "/" + id + "/";
+    const originalKey = await uploadMedia(
+      prefix + "original." + ext[cleanMime],
+      originalBuf,
+      cleanMime,
+    );
+    const originalAudioUrl = await mediaUrl(originalKey);
 
     // 2. Transcribe original voice message
     const originalTranscript = await transcribeRecordedAudio(
       audioBase64,
       cleanMime,
-      effectiveSourceLang
+      effectiveSourceLang,
     );
 
     // 3. Translate transcript into all recipient languages
@@ -1529,7 +1584,7 @@ app.post("/api/chat/voice-note", async (req, res) => {
       translations[lang] = await translateChatText(
         originalTranscript,
         effectiveSourceLang,
-        lang
+        lang,
       );
     }
     const primaryTranslatedTranscript =
@@ -1537,16 +1592,26 @@ app.post("/api/chat/voice-note", async (req, res) => {
 
     // 4. Synthesize final translated audio WAV file in primary recipient's language using selected Male/Female tone
     const voiceName = getPrebuiltVoiceForTone(effectiveVoiceTone);
-    const translatedKeys:Record<string,string>={};
-    for(const lang of targetLangs.length?targetLangs:[primaryTargetLang]){
-      const code=getLanguageCode(lang);
-      const wav=await synthesizeTranslatedVoiceNote(translations[lang]||originalTranscript,lang,voiceName);
-      translatedKeys[code]=await uploadMedia(prefix+"translated-"+code+".wav",wav,"audio/wav");
+    const translatedKeys: Record<string, string> = {};
+    for (const lang of targetLangs.length ? targetLangs : [primaryTargetLang]) {
+      const code = getLanguageCode(lang);
+      const wav = await synthesizeTranslatedVoiceNote(
+        translations[lang] || originalTranscript,
+        lang,
+        voiceName,
+      );
+      translatedKeys[code] = await uploadMedia(
+        prefix + "translated-" + code + ".wav",
+        wav,
+        "audio/wav",
+      );
     }
-    const translatedAudioUrl=await mediaUrl(translatedKeys[getLanguageCode(primaryTargetLang)]);
+    const translatedAudioUrl = await mediaUrl(
+      translatedKeys[getLanguageCode(primaryTargetLang)],
+    );
     const message: ChatMessage = {
       id,
-      roomId: room.roomId,
+      roomId: res.locals.room.roomKey,
       kind: "audio",
       senderId: String(senderId),
       senderRole: role,
@@ -1555,6 +1620,8 @@ app.post("/api/chat/voice-note", async (req, res) => {
       originalText: originalTranscript,
       translations,
       audio: {
+        originalKey,
+        translatedKey: translatedKeys[getLanguageCode(primaryTargetLang)],
         translatedAudioUrl,
         translatedLanguage: primaryTargetLang,
         originalAudioUrl,
@@ -1564,13 +1631,33 @@ app.post("/api/chat/voice-note", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    await saveMessage(res.locals.room.id,currentUser(res).id,message,originalKey,translatedKeys);
-    room.messages.push(message);
-    if (room.messages.length > 200) {
-      room.messages = room.messages.slice(-200);
-    }
+    await saveMessage(
+      res.locals.room.id,
+      currentUser(res).id,
+      message,
+      originalKey,
+      translatedKeys,
+    );
 
-    broadcastRoom(room, { type: "chat:message", message });
+    if (room) {
+      for (const listener of room.participants.values()) {
+        const key = translatedKeys[getLanguageCode(listener.language)];
+        const audio = key
+          ? {
+              ...message.audio,
+              translatedKey: key,
+              translatedAudioUrl: await mediaUrl(key),
+              translatedLanguage: listener.language,
+            }
+          : message.audio;
+        safeSend(listener.ws, {
+          type: "chat:message",
+          message: { ...message, audio },
+        });
+      }
+    }
+    for (const u of recipients)
+      sendUser(u.id, { type: "conversation:changed", roomId });
     res.json({ message });
   } catch (err: any) {
     const readable = formatReadableGeminiError(err);
@@ -1598,14 +1685,21 @@ app.post("/api/chat/send", async (req, res) => {
       return res.status(400).json({ error: "Message text is required." });
     }
 
-    const room = getOrCreateRoom(String(roomId || "call-hyderabad-sync"));
+    const room = rooms.get(res.locals.room.roomKey);
     const role: SpeakerRole =
       String(senderRole).toUpperCase() === "B" ? "B" : "A";
     const effectiveSourceLang = String(sourceLanguage || "English");
     const effectiveName = String(senderName || "Participant");
     const trimmedText = text.trim();
 
-    const targetLangs = [...new Set((await members(res.locals.room.id)).filter(u=>u.id!==senderId).map(u=>u.preferredLanguageName))];
+    const recipients = await members(res.locals.room.id);
+    const targetLangs = [
+      ...new Set(
+        recipients
+          .filter((u) => u.id !== senderId)
+          .map((u) => u.preferredLanguageName),
+      ),
+    ];
 
     const translations: Record<string, string> = {
       [effectiveSourceLang]: trimmedText,
@@ -1616,7 +1710,7 @@ app.post("/api/chat/send", async (req, res) => {
         translations[lang] = await translateChatText(
           trimmedText,
           effectiveSourceLang,
-          lang
+          lang,
         );
       } catch (err) {
         console.error(`[Chat Translate -> ${lang}] Fallback:`, err);
@@ -1624,8 +1718,8 @@ app.post("/api/chat/send", async (req, res) => {
     }
 
     const message: ChatMessage = {
-      id:crypto.randomUUID(),
-      roomId: room.roomId,
+      id: crypto.randomUUID(),
+      roomId: res.locals.room.roomKey,
       kind: "text",
       senderId: String(senderId),
       senderRole: role,
@@ -1636,13 +1730,11 @@ app.post("/api/chat/send", async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    await saveMessage(res.locals.room.id,currentUser(res).id,message);
-    room.messages.push(message);
-    if (room.messages.length > 200) {
-      room.messages = room.messages.slice(-200);
-    }
+    await saveMessage(res.locals.room.id, currentUser(res).id, message);
 
-    broadcastRoom(room, { type: "chat:message", message });
+    if (room) broadcastRoom(room, { type: "chat:message", message });
+    for (const u of recipients)
+      sendUser(u.id, { type: "conversation:changed", roomId });
     res.json({ message });
   } catch (err: any) {
     console.error("[Chat Send] Error:", err);
@@ -1652,66 +1744,226 @@ app.post("/api/chat/send", async (req, res) => {
   }
 });
 
-async function persistNotes(room:CallRoom,conversationId:string,call?:typeof calls.$inferSelect) {
-  const team=await members(conversationId);
-  const people=call?.participantSnapshotJson||team.map(u=>({id:u.id,name:u.displayName,language:u.preferredLanguageName}));
-  const transcript=call?.transcriptJson||room.transcripts;
-  const recentChat=await history(conversationId,room.roomId,team[0]);
-  const localized=new Map<string,LocalizedMeetingNote>();
-  for(const user of team){
-    const language=user.preferredLanguageName;
-    let note=localized.get(language);
-    if(!note) {
-      note=await generateLocalizedMeetingNote({targetLanguage:language,participants:people,transcripts:transcript,recentChat});
-      localized.set(language,note);
+async function persistNotes(
+  room: CallRoom,
+  conversationId: string,
+  call?: typeof calls.$inferSelect,
+) {
+  const team = await members(conversationId);
+  const people =
+    call?.participantSnapshotJson ||
+    team.map((u) => ({
+      id: u.id,
+      name: u.displayName,
+      language: u.preferredLanguageName,
+    }));
+  const transcript = call?.transcriptJson || room.transcripts;
+  const recentChat = await history(conversationId, room.roomId, team[0]);
+  const localized = new Map<string, LocalizedMeetingNote>();
+  for (const user of team) {
+    const language = user.preferredLanguageName;
+    let note = localized.get(language);
+    if (!note) {
+      note = await generateLocalizedMeetingNote({
+        targetLanguage: language,
+        participants: people,
+        transcripts: transcript,
+        recentChat,
+      });
+      localized.set(language, note);
     }
-    const body=note;
-    await db.transaction(async tx=>{
-      const [saved]=await tx.insert(noteRows).values({conversationId,callSessionId:call?.id,userId:user.id,languageCode:user.preferredLanguageCode,title:body.title,summary:body.summary,keyDecisionsJson:body.decisions,actionItemsJson:body,transcriptJson:transcript,recordingS3Key:call?.recordingS3Key}).onConflictDoNothing().returning();
-      if(!saved)return;
-      if(body.todos.length)await tx.insert(tasks).values(body.todos.map(t=>({userId:user.id,conversationId,meetingNoteId:saved.id,sourceTodoId:t.id,title:t.task,assigneeName:t.assignee,dueHint:t.dueHint}))).onConflictDoNothing();
-      if(user.id===team[0].id)await tx.insert(messageRows).values({conversationId,senderUserId:user.id,kind:"call_summary",callSessionId:call?.id,sourceLanguageCode:user.preferredLanguageCode,originalText:body.title+" — "+body.summary});
+    const body = note;
+    await db.transaction(async (tx) => {
+      const [saved] = await tx
+        .insert(noteRows)
+        .values({
+          conversationId,
+          callSessionId: call?.id,
+          userId: user.id,
+          languageCode: user.preferredLanguageCode,
+          title: body.title,
+          summary: body.summary,
+          keyDecisionsJson: body.decisions,
+          actionItemsJson: body,
+          transcriptJson: transcript,
+          recordingS3Key: call?.recordingS3Key,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (!saved) return;
+      if (body.todos.length)
+        await tx
+          .insert(tasks)
+          .values(
+            body.todos.map((t) => ({
+              userId: user.id,
+              conversationId,
+              meetingNoteId: saved.id,
+              sourceTodoId: t.id,
+              title: t.task,
+              assigneeName: t.assignee,
+              dueHint: t.dueHint,
+            })),
+          )
+          .onConflictDoNothing();
+      if (user.id === team[0].id)
+        await tx
+          .insert(messageRows)
+          .values({
+            conversationId,
+            senderUserId: user.id,
+            kind: "call_summary",
+            callSessionId: call?.id,
+            sourceLanguageCode: user.preferredLanguageCode,
+            originalText: body.title + " — " + body.summary,
+          });
     });
-    sendUser(user.id,{type:"workspace:changed",roomId:room.roomId});
+    sendUser(user.id, { type: "workspace:changed", roomId: room.roomId });
   }
 }
-app.post("/api/notes/generate",route(async(req,res)=>{
-  const r=res.locals.room,u=currentUser(res),room=getOrCreateRoom(r.roomKey);
-  const [call]=req.body.callSessionId?await db.select().from(calls).where(and(eq(calls.id,req.body.callSessionId),eq(calls.conversationId,r.id))):[];
-  await persistNotes(room,r.id,call);
-  res.json({note:(await noteList(u.id,r.roomKey))[0]});
+// Release a reserved or answered session if media setup fails before joining.
+app.post("/api/calls/:id/join-failed",route(async(req,res)=>{
+  const id=req.params.id, user=currentUser(res);
+  const [call]=await db.select().from(calls).where(eq(calls.id,id));
+  if(!call)throw new HttpError(404,"Call unavailable.");
+  const [target]=await db.select().from(rings).where(and(eq(rings.callSessionId,id),eq(rings.targetUserId,user.id),eq(rings.status,"answered")));
+  if(call.initiatorUserId!==user.id && !target)throw new HttpError(403,"Call unavailable.");
+  const room=[...rooms.values()].find(r=>r.callId===id);
+  if(room?.callPhase==="active"){res.json({ok:true});return}
+  const ended=await db.transaction(async tx=>{
+    const [changed]=await tx.update(calls).set({status:"ended",endedAt:new Date()}).where(and(eq(calls.id,id),inArray(calls.status,["ringing","active"]))).returning();
+    if(changed)await tx.update(rings).set({status:"cancelled",updatedAt:new Date()}).where(and(eq(rings.callSessionId,id),inArray(rings.status,["ringing","delivered"])));
+    return changed;
+  });
+  if(ended)for(const person of ended.participantSnapshotJson)sendUser(person.id,{type:"call:cancelled",callSessionId:id});
+  res.json({ok:true});
 }));
-app.post("/api/notes/localize",route(async(req,res)=>{
-  const [row]=await db.select().from(noteRows).where(and(eq(noteRows.id,req.body.noteId),eq(noteRows.userId,currentUser(res).id),eq(noteRows.conversationId,res.locals.room.id)));
-  if(!row)throw new HttpError(404,"Note unavailable.");
-  const targetLanguage=String(req.body.targetLanguage).slice(0,48);
-  const localizedNote=await generateLocalizedMeetingNote({targetLanguage,participants:(await members(row.conversationId)).map(u=>({name:u.displayName,language:u.preferredLanguageName})),transcripts:row.transcriptJson,recentChat:await history(row.conversationId,res.locals.room.roomKey,currentUser(res)),canonicalTodoIds:row.actionItemsJson.todos.map(t=>t.id)});
-  res.json({localizedNote});
-}));
-app.post("/api/notes/audio",route(async(req,res)=>{
-  const [n]=await db.select().from(noteRows).where(and(eq(noteRows.id,req.body.noteId),eq(noteRows.userId,currentUser(res).id),eq(noteRows.conversationId,res.locals.room.id)));
-  if(!n)throw new HttpError(404,"Note unavailable.");
-  let key=n.recordingS3Key||n.ttsAudioS3Key;
-  if(!key){
-    const wav=await synthesizeTranslatedVoiceNote(n.summary,n.actionItemsJson.language,getPrebuiltVoiceForTone(currentUser(res).voiceTone));
-    key=await uploadMedia("note-audio/"+n.id+"/"+n.languageCode+".wav",wav,"audio/wav");
-    await db.update(noteRows).set({ttsAudioS3Key:key}).where(eq(noteRows.id,n.id));
-  }
-  res.json({recordingUrl:await mediaUrl(key),source:n.recordingS3Key?"call":"summary_audio"});
-}));
+app.post(
+  "/api/notes/generate",
+  route(async (req, res) => {
+    const r = res.locals.room,
+      u = currentUser(res),
+      room = getOrCreateRoom(r.roomKey);
+    const [call] = req.body.callSessionId
+      ? await db
+          .select()
+          .from(calls)
+          .where(
+            and(
+              eq(calls.id, req.body.callSessionId),
+              eq(calls.conversationId, r.id),
+            ),
+          )
+      : [];
+    await persistNotes(room, r.id, call);
+    res.json({ note: (await noteList(u.id, r.roomKey))[0] });
+  }),
+);
+app.post(
+  "/api/notes/localize",
+  route(async (req, res) => {
+    const [row] = await db
+      .select()
+      .from(noteRows)
+      .where(
+        and(
+          eq(noteRows.id, req.body.noteId),
+          eq(noteRows.userId, currentUser(res).id),
+          eq(noteRows.conversationId, res.locals.room.id),
+        ),
+      );
+    if (!row) throw new HttpError(404, "Note unavailable.");
+    const targetLanguage = String(req.body.targetLanguage).slice(0, 48);
+    const localizedNote = await generateLocalizedMeetingNote({
+      targetLanguage,
+      participants: (await members(row.conversationId)).map((u) => ({
+        name: u.displayName,
+        language: u.preferredLanguageName,
+      })),
+      transcripts: row.transcriptJson,
+      recentChat: await history(
+        row.conversationId,
+        res.locals.room.roomKey,
+        currentUser(res),
+      ),
+      canonicalTodoIds: row.actionItemsJson.todos.map((t) => t.id),
+    });
+    await db
+      .update(noteRows)
+      .set({
+        localizationsJson: sql`${noteRows.localizationsJson} || ${JSON.stringify({ [targetLanguage]: localizedNote })}::jsonb`,
+      })
+      .where(eq(noteRows.id, row.id));
+    res.json({ localizedNote });
+  }),
+);
+app.post(
+  "/api/notes/audio",
+  route(async (req, res) => {
+    const [n] = await db
+      .select()
+      .from(noteRows)
+      .where(
+        and(
+          eq(noteRows.id, req.body.noteId),
+          eq(noteRows.userId, currentUser(res).id),
+          eq(noteRows.conversationId, res.locals.room.id),
+        ),
+      );
+    if (!n) throw new HttpError(404, "Note unavailable.");
+    let key = n.recordingS3Key || n.ttsAudioS3Key;
+    if (!key) {
+      const wav = await synthesizeTranslatedVoiceNote(
+        n.summary,
+        n.actionItemsJson.language,
+        getPrebuiltVoiceForTone(currentUser(res).voiceTone),
+      );
+      key = await uploadMedia(
+        "note-audio/" + n.id + "/" + n.languageCode + ".wav",
+        wav,
+        "audio/wav",
+      );
+      await db
+        .update(noteRows)
+        .set({ ttsAudioS3Key: key })
+        .where(eq(noteRows.id, n.id));
+    }
+    res.json({
+      recordingUrl: await mediaUrl(key),
+      source: n.recordingS3Key ? "call" : "summary_audio",
+    });
+  }),
+);
 
 // ============================================================================
 // Server Startup + Multi-Participant WebSocket Hub
 // ============================================================================
 
 async function startServer() {
-  app.use("/api", (_req,res)=>res.status(404).json({error:"Unknown endpoint."}));
-  app.use((err:any,_req:express.Request,res:express.Response,_next:express.NextFunction)=>{
-    if(!err.status || err.status>=500) console.error("Request failed",err.name,err.code);
-    res.status(err.status||500).json({error:err.status && err.status<500?err.message:"Request failed. Please try again."});
-  });
+  app.use("/api", (_req, res) =>
+    res.status(404).json({ error: "Unknown endpoint." }),
+  );
+  app.use(
+    (
+      err: any,
+      _req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      if (!err.status || err.status >= 500)
+        console.error("Request failed", err.name, err.code);
+      res
+        .status(err.status || 500)
+        .json({
+          error:
+            err.status && err.status < 500
+              ? err.message
+              : "Request failed. Please try again.",
+        });
+    },
+  );
   if (process.env.NODE_ENV !== "production") {
-    const {createServer:createViteServer}=await import("vite");
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -1720,7 +1972,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(["/server.cjs", "/server.cjs.map"], (_req, res) =>
-      res.status(404).end()
+      res.status(404).end(),
     );
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
@@ -1728,6 +1980,30 @@ async function startServer() {
     });
   }
 
+  if (process.env.DATABASE_URL) {
+    // This deployment uses one signaling process. Sessions from a previous
+    // process have lost their live audio connections.
+    await db.transaction(async (tx) => {
+      const interrupted = await tx
+        .update(calls)
+        .set({ status: "ended", endedAt: new Date() })
+        .where(eq(calls.status, "active"))
+        .returning({ id: calls.id });
+      if (interrupted.length)
+        await tx
+          .update(rings)
+          .set({ status: "cancelled", updatedAt: new Date() })
+          .where(
+            and(
+              inArray(
+                rings.callSessionId,
+                interrupted.map((c) => c.id),
+              ),
+              inArray(rings.status, ["ringing", "delivered"]),
+            ),
+          );
+    });
+  }
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Sahva Live Call Translator server running on port ${PORT}`);
   });
@@ -1738,437 +2014,493 @@ async function startServer() {
   });
 
   startSignaling();
-  server.on("upgrade", async(request,socket,head)=>{
+  server.on("upgrade", async (request, socket, head) => {
     try {
-      const url=new URL(request.url||"/","http://localhost");
-      if(!["/ws/user","/ws/call"].includes(url.pathname)) throw new HttpError(404,"Unknown socket");
-      if(request.headers.origin && !origins().includes(request.headers.origin)) throw new HttpError(403,"Origin denied");
-      const token=url.searchParams.get("token")||request.headers["sec-websocket-protocol"]?.split(",").map(x=>x.trim()).find(x=>x.startsWith("jwt."))?.slice(4)||"";
-      const user=await authenticate(token);
-      const room=url.pathname==="/ws/call"?await membership(user.id,url.searchParams.get("roomId")||""):null;
-      wss.handleUpgrade(request,socket,head,ws=>{
-        ws.on("error",()=>ws.terminate());
-        if(!room)attachUserSocket(user,ws);
-        else wss.emit("connection",ws,request,user,room);
+      const url = new URL(request.url || "/", "http://localhost");
+      if (!["/ws/user", "/ws/call"].includes(url.pathname))
+        throw new HttpError(404, "Unknown socket");
+      if (request.headers.origin && !origins().includes(request.headers.origin))
+        throw new HttpError(403, "Origin denied");
+      const token =
+        url.searchParams.get("token") ||
+        request.headers["sec-websocket-protocol"]
+          ?.split(",")
+          .map((x) => x.trim())
+          .find((x) => x.startsWith("jwt."))
+          ?.slice(4) ||
+        "";
+      const user = await authenticate(token);
+      const room =
+        url.pathname === "/ws/call"
+          ? await membership(user.id, url.searchParams.get("roomId") || "")
+          : null;
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        ws.on("error", () => ws.terminate());
+        if (!room) attachUserSocket(user, ws);
+        else wss.emit("connection", ws, request, user, room);
       });
-    } catch(e){socket.end("HTTP/1.1 "+(e instanceof HttpError?e.status:503)+" Request rejected\r\nConnection: close\r\n\r\n");}
+    } catch (e) {
+      socket.end(
+        "HTTP/1.1 " +
+          (e instanceof HttpError ? e.status : 503) +
+          " Request rejected\r\nConnection: close\r\n\r\n",
+      );
+    }
   });
 
-  wss.on("connection", (ws:WebSocket, req:any, user:import("./src/db/schema").User, conversation:typeof import("./src/db/schema").conversations.$inferSelect) => {
-    const urlObj=new URL(req.url,"http://localhost");
-    const roomId = urlObj.searchParams.get("roomId") || "call-hyderabad-sync";
-    const participantId = user.id;
-    const roleParam = (urlObj.searchParams.get("role") || "A").toUpperCase();
-    const role: SpeakerRole = roleParam === "B" ? "B" : "A";
-    const nameParam=user.displayName;
-    const langParam=user.preferredLanguageName;
-    const roomTitleParam = urlObj.searchParams.get("roomTitle")?.trim();
-    const modelParam = urlObj.searchParams.get("model")?.trim();
-    const voiceToneParam = urlObj.searchParams.get("voiceTone")?.trim();
-    const voiceTone: VoiceTone = voiceToneParam === "male" ? "male" : "female";
-    const preferredModel: TranslationModelPreference =
-      modelParam === "gemini-3.8-live" ||
-      modelParam === "gemini-3.5-live-translate-preview"
-        ? modelParam
-        : "auto";
-
-    const room=getOrCreateRoom(roomId,conversation.title);
-    room.isCustomRoom=conversation.isGroup;
-    let slot = room.participants.get(participantId);
-
-    if (slot) {
-      if (slot.ws && slot.ws !== ws) {
-        try {
-          slot.ws.close(4000, "Replaced by newer session");
-        } catch {}
-      }
-      slot.ws = ws;
-      if (nameParam) slot.name = nameParam.slice(0, 48);
-      if (langParam) slot.language = langParam.slice(0, 48);
-      slot.voiceTone = voiceTone;
-      slot.preferredModel = preferredModel;
-    } else {
-      slot = createParticipantSlot(
+  wss.on(
+    "connection",
+    (
+      ws: WebSocket,
+      req: any,
+      user: import("./src/db/schema").User,
+      conversation: typeof import("./src/db/schema").conversations.$inferSelect,
+    ) => {
+      const urlObj = new URL(req.url, "http://localhost");
+      const roomId = urlObj.searchParams.get("roomId") || "call-hyderabad-sync";
+      const participantId = user.id;
+      const socketId = crypto.randomUUID();
+      const room = getOrCreateRoom(roomId, conversation.title);
+      room.isCustomRoom = conversation.isGroup;
+      const slot = createParticipantSlot(
         participantId,
-        role,
-        (nameParam || "Participant").slice(0, 48),
-        (langParam || "English").slice(0, 48),
-        preferredModel,
-        voiceTone
+        conversation.createdByUserId === user.id ? "A" : "B",
+        user.displayName,
+        user.preferredLanguageName,
+        user.audioModelPreference,
+        user.voiceTone,
       );
       slot.ws = ws;
-      room.participants.set(participantId, slot);
-    }
+      room.participants.set(socketId, slot);
+      void Promise.all([
+        history(conversation.id, roomId, user),
+        noteList(user.id, roomId),
+      ])
+        .then(([messages, notes]) =>
+          safeSend(ws, {
+            type: "room:init",
+            selfId: participantId,
+            snapshot: { ...buildRoomSnapshot(room), messages, notes },
+          }),
+        )
+        .catch(() => ws.close(1011));
+      broadcastPresence(room);
 
-    void Promise.all([history(conversation.id,roomId,user),noteList(user.id,roomId)]).then(([messages,notes])=>safeSend(ws, {
-      type: "room:init",
-      selfId: participantId,
-      snapshot: {...buildRoomSnapshot(room),messages,notes},
-    })).catch(()=>ws.close(1011));
-    broadcastPresence(room);
-
-    ws.on("message", (rawData) => {void (async()=>{
-      if(slot!.ws!==ws)return;
-      let msg: any;
-      try {
-        msg = JSON.parse(rawData.toString());
-      } catch {
-        return;
-      }
-
-      room.lastActivityAt = Date.now();
-
-      switch (msg.type) {
-        case "profile:update": {
-          const prevLang = slot!.language;
-          const prevModel = slot!.preferredModel;
-          const prevTone = slot!.voiceTone;
-          if (typeof msg.name === "string" && msg.name.trim()) {
-            slot!.name = msg.name.trim().slice(0, 48);
-          }
-          if (typeof msg.language === "string" && msg.language.trim()) {
-            slot!.language = msg.language.trim().slice(0, 48);
-          }
-          if (msg.voiceTone === "male" || msg.voiceTone === "female") {
-            slot!.voiceTone = msg.voiceTone;
-          }
-          if (
-            msg.model === "auto" ||
-            msg.model === "gemini-3.5-live-translate-preview" ||
-            msg.model === "gemini-3.8-live"
-          ) {
-            slot!.preferredModel = msg.model;
-          }
-          broadcastPresence(room);
-
-          if (
-            room.callPhase === "active" &&
-            (prevLang !== slot!.language ||
-              prevModel !== slot!.preferredModel ||
-              prevTone !== slot!.voiceTone)
-          ) {
-            if (prevModel !== slot!.preferredModel || prevTone !== slot!.voiceTone || prevLang !== slot!.language) {
-              closeAllSlotTranslators(room, slot!);
-            }
-            await syncAllCallTranslators(room);
-          }
-          break;
-        }
-
-        case "call:join": {
-          const [session]=await db.select().from(calls).where(and(eq(calls.id,msg.callSessionId),eq(calls.conversationId,conversation.id),inArray(calls.status,["ringing","active"])));
-          const allowed=session && (session.initiatorUserId===user.id || (await db.select().from(rings).where(and(eq(rings.callSessionId,session.id),eq(rings.targetUserId,user.id),eq(rings.status,"answered")))).length);
-          if(!allowed || slot!.ws!==ws || (room.callPhase!=="idle" && room.callId!==session.id))return safeSend(ws,{type:"call:error",message:"Call is unavailable."});
-          room.callId=session.id;
-          if (typeof msg.name === "string" && msg.name.trim()) {
-            slot!.name = msg.name.trim().slice(0, 48);
-          }
-          if (typeof msg.language === "string" && msg.language.trim()) {
-            slot!.language = msg.language.trim().slice(0, 48);
-          }
-          if (msg.voiceTone === "male" || msg.voiceTone === "female") {
-            slot!.voiceTone = msg.voiceTone;
-          }
-          if (
-            msg.model === "auto" ||
-            msg.model === "gemini-3.5-live-translate-preview" ||
-            msg.model === "gemini-3.8-live"
-          ) {
-            slot!.preferredModel = msg.model;
-          }
-          slot!.inCall = true;
-          slot!.muted = false;
-
-          const activeSlots = getInCallSlots(room);
-
-          if (activeSlots.length >= 2) {
-            // 2+ participants are in the call — activate / expand live multilingual translation!
-            const newlyActive = room.callPhase !== "active";
-            room.callPhase = "active";
-            if (!room.callId) {
-              room.callId=session.id;
-            }
-            if (!room.callStartedAt || newlyActive) {
-              room.callStartedAt = new Date().toISOString();
-              room.callStartEpochMs = Date.now();
-              room.recordingChunks = [];
-              room.lastRecordingUrl = null;
-            }
-            broadcastPresence(room);
-            await syncAllCallTranslators(room);
-          } else {
-            // Initiating call: enter waiting/ringing state until at least 1 other person joins
-            room.callPhase = "ringing";
-            room.callerId = slot!.id;
-            room.callId=session.id;
-            room.callStartedAt = null;
-            room.callStartEpochMs = null;
-            room.recordingChunks = [];
-            room.lastRecordingUrl = null;
-            room.transcripts = [];
-            broadcastPresence(room);
-          }
-          break;
-        }
-
-        case "call:mute": {
-          slot!.muted = Boolean(msg.muted);
-          if (slot!.muted) {
-            slot!.speaking = false;
-            flushParticipantTurn(room, slot!);
-          }
-          broadcastPresence(room);
-          break;
-        }
-
-        case "call:decline":
-        case "call:end":
-        case "call:leave": {
-          if(!slot!.inCall)return;
-          const prevCallId = room.callId;
-          const wasActive = room.callPhase === "active";
-
-          slot!.inCall = false;
-          slot!.muted = false;
-          slot!.speaking = false;
-          closeAllSlotTranslators(room, slot!);
-
-          const remainingActive = getInCallSlots(room);
-
-          // If >= 2 participants remain on a group call and this wasn't a decline of a 1:1 ring,
-          // keep the group call alive for the remaining speakers!
-          if (
-            msg.type !== "call:decline" &&
-            wasActive &&
-            remainingActive.length >= 2
-          ) {
-            safeSend(slot!.ws, {
-              type: "call:left_self",
-              callId: prevCallId,
-            });
-            broadcastPresence(room);
-            await syncAllCallTranslators(room);
-          } else {
-            // Fewer than 2 remain — finalize call recording & end call cleanly for everyone
-            if (wasActive) {
-              void finishCall(room,conversation.id).catch(e=>console.error("Call finalization failed",e.message));
-            }
-            for (const p of room.participants.values()) {
-              p.inCall = false;
-              p.muted = false;
-              p.speaking = false;
-              closeAllSlotTranslators(room, p);
-            }
-            room.callPhase = "idle";
-            room.callerId = null;
-            room.callStartedAt = null;
-            room.callStartEpochMs = null;
-
-            broadcastRoom(room, {
-              type: "call:ended",
-              endedById: slot!.id,
-              endedByName: slot!.name,
-              wasActive,
-              callId: prevCallId,
-              reason: msg.type === "call:decline" ? "declined" : "ended",
-            });
-            broadcastPresence(room);
-          }
-          break;
-        }
-
-        case "audio:chunk": {
-          // STRICT AUDIO ISOLATION + ACTIVE CALL GATE:
-          // Only stream & translate when 2+ participants are on the active call.
-          // A speaker's own raw or translated audio NEVER returns to themselves.
-          if (
-            room.callPhase !== "active" ||
-            !slot!.inCall ||
-            slot!.muted ||
-            typeof msg.pcm16k !== "string"
-          ) {
+      ws.on("message", (rawData) => {
+        void (async () => {
+          if (slot!.ws !== ws) return;
+          let msg: any;
+          try {
+            msg = JSON.parse(rawData.toString());
+          } catch {
             return;
           }
 
-          // Capture raw 16kHz PCM chunk into time-aligned full call recording buffer
-          const offsetMs = room.callStartEpochMs
-            ? Math.max(0, Date.now() - room.callStartEpochMs)
-            : 0;
-          if (offsetMs <= MAX_RECORDING_MS) {
-            try {
-              room.recordingChunks.push({
-                offsetMs,
-                pcm16k: Buffer.from(msg.pcm16k, "base64"),
-              });
-            } catch {}
-          }
+          room.lastActivityAt = Date.now();
 
-          const rms = typeof msg.rms === "number" ? msg.rms : 0;
-          if (rms > 0.012) {
-            if (!slot!.speaking) {
-              slot!.speaking = true;
+          switch (msg.type) {
+            case "profile:update": {
+              const prevLang = slot!.language;
+              const prevModel = slot!.preferredModel;
+              const prevTone = slot!.voiceTone;
+              if (typeof msg.name === "string" && msg.name.trim()) {
+                slot!.name = msg.name.trim().slice(0, 48);
+              }
+              if (typeof msg.language === "string" && msg.language.trim()) {
+                slot!.language = msg.language.trim().slice(0, 48);
+              }
+              if (msg.voiceTone === "male" || msg.voiceTone === "female") {
+                slot!.voiceTone = msg.voiceTone;
+              }
+              if (
+                msg.model === "auto" ||
+                msg.model === "gemini-3.5-live-translate-preview" ||
+                msg.model === "gemini-3.8-live"
+              ) {
+                slot!.preferredModel = msg.model;
+              }
               broadcastPresence(room);
-            }
-            if (slot!.speakingTimer) clearTimeout(slot!.speakingTimer);
-            slot!.speakingTimer = setTimeout(() => {
-              slot!.speaking = false;
-              broadcastPresence(room);
-            }, 650);
-          }
 
-          // 1. Forward raw original 16kHz PCM STRICTLY to ALL OTHER in-call participants (15% voice bed)
-          for (const listener of room.participants.values()) {
-            if (
-              listener.id !== slot!.id &&
-              listener.inCall &&
-              isSlotConnected(listener)
-            ) {
-              safeSend(listener.ws, {
-                type: "peer:original_audio",
-                fromId: slot!.id,
-                fromName: slot!.name,
-                pcm16k: msg.pcm16k,
-              });
+              if (
+                room.callPhase === "active" &&
+                (prevLang !== slot!.language ||
+                  prevModel !== slot!.preferredModel ||
+                  prevTone !== slot!.voiceTone)
+              ) {
+                if (
+                  prevModel !== slot!.preferredModel ||
+                  prevTone !== slot!.voiceTone ||
+                  prevLang !== slot!.language
+                ) {
+                  closeAllSlotTranslators(room, slot!);
+                }
+                await syncAllCallTranslators(room);
+              }
+              break;
             }
-          }
 
-          // 2. Feed audio to every outbound live translator channel for this speaker
-          for (const tr of slot!.translatorsByLang.values()) {
-            if (tr.liveSession && tr.ready) {
-              try {
-                tr.liveSession.sendRealtimeInput({
-                  audio: {
-                    data: msg.pcm16k,
-                    mimeType: "audio/pcm;rate=16000",
-                  },
+            case "call:join": {
+              const [session] = await db
+                .select()
+                .from(calls)
+                .where(
+                  and(
+                    eq(calls.id, msg.callSessionId),
+                    eq(calls.conversationId, conversation.id),
+                    inArray(calls.status, ["ringing", "active"]),
+                  ),
+                );
+              const allowed =
+                session &&
+                (session.initiatorUserId === user.id ||
+                  (
+                    await db
+                      .select()
+                      .from(rings)
+                      .where(
+                        and(
+                          eq(rings.callSessionId, session.id),
+                          eq(rings.targetUserId, user.id),
+                          eq(rings.status, "answered"),
+                        ),
+                      )
+                  ).length);
+              if (
+                !allowed ||
+                slot!.ws !== ws ||
+                (room.callPhase !== "idle" && room.callId !== session.id)
+              )
+                return safeSend(ws, {
+                  type: "call:error",
+                  message: "Call is unavailable.",
                 });
-              } catch (err) {
-                console.warn("[Live Audio] sendRealtimeInput failed:", err);
+              if (
+                [...room.participants.values()].some(
+                  (p) => p !== slot && p.id === user.id && p.inCall,
+                )
+              )
+                return safeSend(ws, {
+                  type: "call:error",
+                  message: "You joined this call on another device.",
+                });
+              if (slot.inCall) return;
+              room.callId = session.id;
+              if (typeof msg.name === "string" && msg.name.trim()) {
+                slot!.name = msg.name.trim().slice(0, 48);
               }
-            } else if (tr.connecting) {
-              tr.pendingAudioQueue.push(msg.pcm16k);
-              if (tr.pendingAudioQueue.length > 16) {
-                tr.pendingAudioQueue.shift();
+              if (typeof msg.language === "string" && msg.language.trim()) {
+                slot!.language = msg.language.trim().slice(0, 48);
               }
+              if (msg.voiceTone === "male" || msg.voiceTone === "female") {
+                slot!.voiceTone = msg.voiceTone;
+              }
+              if (
+                msg.model === "auto" ||
+                msg.model === "gemini-3.5-live-translate-preview" ||
+                msg.model === "gemini-3.8-live"
+              ) {
+                slot!.preferredModel = msg.model;
+              }
+              slot!.inCall = true;
+              slot!.muted = false;
+
+              const activeSlots = getInCallSlots(room);
+
+              if (activeSlots.length >= 2) {
+                // 2+ participants are in the call — activate / expand live multilingual translation!
+                const newlyActive = room.callPhase !== "active";
+                room.callPhase = "active";
+                if (!room.callId) {
+                  if (
+                    [...room.participants.values()].some(
+                      (p) => p !== slot && p.id === user.id && p.inCall,
+                    )
+                  )
+                    return safeSend(ws, {
+                      type: "call:error",
+                      message: "You joined this call on another device.",
+                    });
+                  if (slot.inCall) return;
+                  room.callId = session.id;
+                }
+                if (!room.callStartedAt || newlyActive) {
+                  room.callStartedAt = new Date().toISOString();
+                  room.callStartEpochMs = Date.now();
+                  room.recording = null;
+                }
+                broadcastPresence(room);
+                await syncAllCallTranslators(room);
+              } else {
+                // Initiating call: enter waiting/ringing state until at least 1 other person joins
+                room.callPhase = "ringing";
+                room.callerId = slot!.id;
+                if (
+                  [...room.participants.values()].some(
+                    (p) => p !== slot && p.id === user.id && p.inCall,
+                  )
+                )
+                  return safeSend(ws, {
+                    type: "call:error",
+                    message: "You joined this call on another device.",
+                  });
+                if (slot.inCall) return;
+                room.callId = session.id;
+                room.callStartedAt = null;
+                room.callStartEpochMs = null;
+                room.recording = null;
+                room.transcripts = [];
+                broadcastPresence(room);
+              }
+              break;
             }
-          }
-          break;
-        }
 
-        case "transcript:manual": {
-          const text = typeof msg.text === "string" ? msg.text.trim() : "";
-          if (!text) return;
+            case "call:mute": {
+              slot!.muted = Boolean(msg.muted);
+              if (slot!.muted) {
+                slot!.speaking = false;
+                flushParticipantTurn(room, slot!);
+              }
+              broadcastPresence(room);
+              break;
+            }
 
-          const targetLangs = collectRoomTargetLanguages(
-            room,
-            slot!.id,
-            slot!.language
-          );
-          const translations: Record<string, string> = {
-            [slot!.language]: text,
-          };
-          for (const lang of targetLangs) {
-            try {
-              translations[lang] = await translateChatText(
-                text,
-                slot!.language,
-                lang
+            case "call:decline":
+            case "call:end":
+            case "call:leave": {
+              if (!slot!.inCall) return;
+              const prevCallId = room.callId;
+              const wasActive = room.callPhase === "active";
+
+              slot!.inCall = false;
+              slot!.muted = false;
+              slot!.speaking = false;
+              closeAllSlotTranslators(room, slot!);
+
+              const remainingActive = getInCallSlots(room);
+
+              // If >= 2 participants remain on a group call and this wasn't a decline of a 1:1 ring,
+              // keep the group call alive for the remaining speakers!
+              if (
+                msg.type !== "call:decline" &&
+                wasActive &&
+                remainingActive.length >= 2
+              ) {
+                safeSend(slot!.ws, {
+                  type: "call:left_self",
+                  callId: prevCallId,
+                });
+                broadcastPresence(room);
+                await syncAllCallTranslators(room);
+              } else {
+                // Fewer than 2 remain — finalize call recording & end call cleanly for everyone
+                if (prevCallId) {
+                  void finishCall(room, conversation.id).catch((e) =>
+                    console.error("Call finalization failed", e.message),
+                  );
+                }
+                for (const p of room.participants.values()) {
+                  p.inCall = false;
+                  p.muted = false;
+                  p.speaking = false;
+                  closeAllSlotTranslators(room, p);
+                }
+                room.callPhase = "idle";
+                room.callerId = null;
+                room.callStartedAt = null;
+                room.callStartEpochMs = null;
+
+                broadcastRoom(room, {
+                  type: "call:ended",
+                  endedById: slot!.id,
+                  endedByName: slot!.name,
+                  wasActive,
+                  callId: prevCallId,
+                  reason: msg.type === "call:decline" ? "declined" : "ended",
+                });
+                broadcastPresence(room);
+              }
+              break;
+            }
+
+            case "audio:chunk": {
+              // STRICT AUDIO ISOLATION + ACTIVE CALL GATE:
+              // Only stream & translate when 2+ participants are on the active call.
+              // A speaker's own raw or translated audio NEVER returns to themselves.
+              if (
+                room.callPhase !== "active" ||
+                !slot!.inCall ||
+                slot!.muted ||
+                typeof msg.pcm16k !== "string"
+              ) {
+                return;
+              }
+
+              // Capture raw 16kHz PCM chunk into time-aligned full call recording buffer
+              const offsetMs = room.callStartEpochMs
+                ? Math.max(0, Date.now() - room.callStartEpochMs)
+                : 0;
+              if (msg.pcm16k.length > 43000) return;
+              room.recording ??= new MixedRecording();
+              room.recording.append(
+                offsetMs,
+                Buffer.from(msg.pcm16k, "base64"),
               );
-            } catch {
-              translations[lang] = text;
-            }
-          }
-          const primaryTarget = targetLangs[0] || slot!.language;
 
-          const entry: TranscriptEntry = {
-            id: `tr-manual-${Date.now()}-${crypto.randomBytes(2).toString("hex")}`,
-            callId: room.callId || "session",
-            speakerId: slot!.id,
-            speakerRole: slot!.role,
-            speakerName: slot!.name,
-            sourceLanguage: slot!.language,
-            targetLanguage: primaryTarget,
-            originalText: text,
-            translatedText: translations[primaryTarget] || text,
-            translations,
-            timestamp: new Date().toISOString(),
-          };
-          room.transcripts.push(entry);
-          broadcastRoom(room, { type: "call:transcript", entry });
-          break;
-        }
-
-        case "todo:toggle": {
-          const { noteId, todoId, completed } = msg;
-          const note = room.notes.find((n) => n.id === noteId);
-          if (note && typeof todoId === "string") {
-            note.todoStates[todoId] = Boolean(completed);
-            for (const loc of Object.values(note.localized)) {
-              for (const td of loc.todos) {
-                if (td.id === todoId) td.completed = Boolean(completed);
+              const rms = typeof msg.rms === "number" ? msg.rms : 0;
+              if (rms > 0.012) {
+                if (!slot!.speaking) {
+                  slot!.speaking = true;
+                  broadcastPresence(room);
+                }
+                if (slot!.speakingTimer) clearTimeout(slot!.speakingTimer);
+                slot!.speakingTimer = setTimeout(() => {
+                  slot!.speaking = false;
+                  broadcastPresence(room);
+                }, 650);
               }
+
+              // 1. Forward raw original 16kHz PCM STRICTLY to ALL OTHER in-call participants (15% voice bed)
+              for (const listener of room.participants.values()) {
+                if (
+                  listener.id !== slot!.id &&
+                  listener.inCall &&
+                  isSlotConnected(listener)
+                ) {
+                  safeSend(listener.ws, {
+                    type: "peer:original_audio",
+                    fromId: slot!.id,
+                    fromName: slot!.name,
+                    pcm16k: msg.pcm16k,
+                  });
+                }
+              }
+
+              // 2. Feed audio to every outbound live translator channel for this speaker
+              for (const tr of slot!.translatorsByLang.values()) {
+                if (tr.liveSession && tr.ready) {
+                  try {
+                    tr.liveSession.sendRealtimeInput({
+                      audio: {
+                        data: msg.pcm16k,
+                        mimeType: "audio/pcm;rate=16000",
+                      },
+                    });
+                  } catch (err) {
+                    console.warn("[Live Audio] sendRealtimeInput failed:", err);
+                  }
+                } else if (tr.connecting) {
+                  tr.pendingAudioQueue.push(msg.pcm16k);
+                  if (tr.pendingAudioQueue.length > 16) {
+                    tr.pendingAudioQueue.shift();
+                  }
+                }
+              }
+              break;
             }
-            broadcastRoom(room, {
-              type: "note:todo_updated",
-              noteId,
-              todoId,
-              completed: Boolean(completed),
-            });
+
+            case "transcript:manual": {
+              const text = typeof msg.text === "string" ? msg.text.trim() : "";
+              if (!text) return;
+
+              const targetLangs = collectRoomTargetLanguages(
+                room,
+                slot!.id,
+                slot!.language,
+              );
+              const translations: Record<string, string> = {
+                [slot!.language]: text,
+              };
+              for (const lang of targetLangs) {
+                try {
+                  translations[lang] = await translateChatText(
+                    text,
+                    slot!.language,
+                    lang,
+                  );
+                } catch {
+                  translations[lang] = text;
+                }
+              }
+              const primaryTarget = targetLangs[0] || slot!.language;
+
+              const entry: TranscriptEntry = {
+                id: `tr-manual-${Date.now()}-${crypto.randomBytes(2).toString("hex")}`,
+                callId: room.callId || "session",
+                speakerId: slot!.id,
+                speakerRole: slot!.role,
+                speakerName: slot!.name,
+                sourceLanguage: slot!.language,
+                targetLanguage: primaryTarget,
+                originalText: text,
+                translatedText: translations[primaryTarget] || text,
+                translations,
+                timestamp: new Date().toISOString(),
+              };
+              room.transcripts.push(entry);
+              broadcastRoom(room, { type: "call:transcript", entry });
+              break;
+            }
           }
-          break;
-        }
-      }
-    })().catch(()=>safeSend(ws,{type:"call:error",message:"Call operation failed."}));});
+        })().catch(() =>
+          safeSend(ws, {
+            type: "call:error",
+            message: "Call operation failed.",
+          }),
+        );
+      });
 
-    ws.on("close", async () => {
-      if (slot && slot.ws === ws) {
-        const wasInCall = slot.inCall;
-        const wasActive = room.callPhase === "active";
-        const prevCallId = room.callId;
+      ws.on("close", async () => {
+        if (slot && slot.ws === ws) {
+          const wasInCall = slot.inCall;
+          const wasActive = room.callPhase === "active";
+          const prevCallId = room.callId;
 
-        slot.ws = null;
-        slot.inCall = false;
-        slot.muted = false;
-        slot.speaking = false;
-        closeAllSlotTranslators(room, slot);
-        room.participants.delete(participantId);
+          slot.ws = null;
+          slot.inCall = false;
+          slot.muted = false;
+          slot.speaking = false;
+          closeAllSlotTranslators(room, slot);
+          room.participants.delete(socketId);
 
-        if (wasInCall) {
-          const remainingActive = getInCallSlots(room);
-          if (wasActive && remainingActive.length >= 2) {
-            broadcastPresence(room);
-            await syncAllCallTranslators(room);
+          if (wasInCall) {
+            const remainingActive = getInCallSlots(room);
+            if (wasActive && remainingActive.length >= 2) {
+              broadcastPresence(room);
+              await syncAllCallTranslators(room);
+            } else {
+              if (prevCallId) {
+                void finishCall(room, conversation.id).catch((e) =>
+                  console.error("Call finalization failed", e.message),
+                );
+              }
+              for (const p of room.participants.values()) {
+                p.inCall = false;
+                p.muted = false;
+                p.speaking = false;
+                closeAllSlotTranslators(room, p);
+              }
+              room.callPhase = "idle";
+              room.callerId = null;
+              room.callStartedAt = null;
+              room.callStartEpochMs = null;
+              broadcastRoom(room, {
+                type: "call:ended",
+                endedById: participantId,
+                endedByName: slot.name,
+                wasActive,
+                callId: prevCallId,
+                reason: "disconnected",
+              });
+              broadcastPresence(room);
+            }
           } else {
-            if (wasActive) {
-              void finishCall(room,conversation.id).catch(e=>console.error("Call finalization failed",e.message));
-            }
-            for (const p of room.participants.values()) {
-              p.inCall = false;
-              p.muted = false;
-              p.speaking = false;
-              closeAllSlotTranslators(room, p);
-            }
-            room.callPhase = "idle";
-            room.callerId = null;
-            room.callStartedAt = null;
-            room.callStartEpochMs = null;
-            broadcastRoom(room, {
-              type: "call:ended",
-              endedById: participantId,
-              endedByName: slot.name,
-              wasActive,
-              callId: prevCallId,
-              reason: "disconnected",
-            });
             broadcastPresence(room);
           }
-        } else {
-          broadcastPresence(room);
+          if (!room.participants.size) rooms.delete(roomId);
         }
-        if(!room.participants.size) rooms.delete(roomId);
-      }
-    });
-  });
+      });
+    },
+  );
 }
 
 startServer().catch((err) => {

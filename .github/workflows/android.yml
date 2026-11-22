@@ -8,6 +8,15 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sahva_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10
     timeout-minutes: 25
     env:
       VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
@@ -28,6 +37,11 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npx drizzle-kit generate && git diff --exit-code -- drizzle && test -z "$(git ls-files --others --exclude-standard drizzle)"
+      - name: Test PostgreSQL migrations and signaling
+        env:
+          DATABASE_URL: postgresql://postgres@127.0.0.1:5432/sahva_test
+          SAHVA_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/sahva_test
+        run: node dist-server/migrate.js && node --test scripts/signaling.integration.mjs
       - run: npm run android:apk
       - uses: actions/upload-artifact@v4
         with:

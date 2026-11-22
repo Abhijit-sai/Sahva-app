@@ -1,3 +1,4 @@
+import {request} from "../lib/runtimeConfig";
 import { useState, useRef, useEffect } from "react";
 import { Play, Pause, FileText, Volume2 } from "lucide-react";
 import { areSameLanguage } from "../data/languages";
@@ -20,9 +21,11 @@ function InlineClipPlayer({
   src,
   label,
   fallbackDuration,
+  mediaKey,
   accent,
 }: {
   src: string;
+  mediaKey?:string;
   label: string;
   fallbackDuration: number;
   accent: "blue" | "slate";
@@ -69,7 +72,11 @@ function InlineClipPlayer({
     if (playing) {
       el.pause();
     } else {
-      el.play().catch(() => {});
+      el.play().catch(async()=>{
+        if(!mediaKey)return;
+        const {url}=await request("/api/media/"+mediaKey+"?format=json");
+        el.src=url;await el.play();
+      }).catch(()=>setPlaying(false));
     }
   };
 
@@ -163,7 +170,7 @@ export default function AudioMessageBubble({
     <div className="space-y-1.5 text-left">
       {/* Primary delivered audio: strictly the final translated voice file */}
       <InlineClipPlayer
-        src={audio.translatedAudioUrl}
+        src={audio.translatedAudioUrl} mediaKey={audio.translatedKey}
         label={`Translated · ${audio.translatedLanguage}`}
         fallbackDuration={audio.durationSeconds}
         accent={accent}
@@ -235,7 +242,7 @@ export default function AudioMessageBubble({
           }`}
         >
           <InlineClipPlayer
-            src={audio.originalAudioUrl}
+            src={audio.originalAudioUrl} mediaKey={audio.originalKey}
             label={`Original · ${audio.originalLanguage}`}
             fallbackDuration={audio.durationSeconds}
             accent={accent}

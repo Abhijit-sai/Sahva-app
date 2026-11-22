@@ -1,3 +1,4 @@
+import {bridge,native} from "../lib/runtimeConfig";
 import { useState, useRef, useEffect } from "react";
 import {
   CheckSquare,
@@ -280,6 +281,7 @@ export default function MeetingNotesView({
     if (!selectedNote || isPreparingAudio) return;
     const url = await ensureAudioReady();
     if (!url) return;
+    if(native){await bridge.downloadRecording({url}).catch(()=>setRecordingError("Could not download recording."));return}
     const a = document.createElement("a");
     try {
       const response=await fetch(url);
@@ -342,7 +344,6 @@ export default function MeetingNotesView({
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(a.href),60000);
     URL.revokeObjectURL(url);
   };
 

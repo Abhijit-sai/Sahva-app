@@ -1,7 +1,20 @@
-import {apiFetch,request,openSocket,native,bridge,webOrigin} from "./lib/runtimeConfig";
+import {
+  apiFetch,
+  request,
+  openSocket,
+  native,
+  bridge,
+  webOrigin,
+} from "./lib/runtimeConfig";
 import IncomingCalls from "./components/IncomingCalls";
 import type { User as SahvaUser } from "./db/schema";
-import { useState, useEffect, useRef, useCallback, type FormEvent } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type FormEvent,
+} from "react";
 import {
   Phone,
   MessageSquare,
@@ -23,11 +36,7 @@ import CallLogView from "./components/CallLogView";
 import TaskListView from "./components/TaskListView";
 import ProfileView from "./components/ProfileView";
 import {
-  DEFAULT_CONVERSATIONS,
-  INITIAL_CALL_LOGS,
-  SELF_AVATAR,
   getAvatarForName,
-  getDefaultVoiceToneForName,
 } from "./data/conversations";
 import {
   CallAudioEngine,
@@ -62,7 +71,7 @@ const DEFAULT_MIX: AudioMixSettings = {
   muteOriginal: false,
 };
 
-const STORAGE_THEME_KEY="sahva:theme:v1";
+const STORAGE_THEME_KEY = "sahva:theme:v1";
 
 function parseUrlParams() {
   const params = new URLSearchParams(window.location.search);
@@ -87,25 +96,59 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<void>}) {
-  const initialUrl=useRef(parseUrlParams()).current;
-  const selfId=user.id;
-  const [darkMode,setDarkMode]=useState(user.theme==="dark");
+export default function App({
+  user,
+  signOut,
+}: {
+  user: SahvaUser;
+  signOut: () => Promise<void>;
+}) {
+  const initialUrl = useRef(parseUrlParams()).current;
+  const selfId = user.id;
+  const [darkMode, setDarkMode] = useState(user.theme === "dark");
   // Home 4-tab navigation (Chats | Calls | List | Profile)
   const [homeTab, setHomeTab] = useState<HomeTab>("chats");
   const [chatSearch, setChatSearch] = useState("");
   const [mobilePane, setMobilePane] = useState<MobilePane>(
-    initialUrl.room ? "thread" : "list"
+    initialUrl.room ? "thread" : "list",
   );
 
   // Conversations (Recent Chats + All Contacts + Custom Rooms)
-  type Thread=ConversationThread & {id?:string;inviteToken?:string;targetUserIds?:string[]};
-  const [conversations,setConversations]=useState<Thread[]>([]);
-  const [activeRoomId,setActiveRoomId]=useState(initialUrl.room);
-  const empty:Thread={roomId:"",title:"",partnerRoleLabel:"",partnerLocation:"",partnerName:"",partnerLanguage:"",partnerAvatar:"",defaultSelfName:user.displayName,defaultSelfLanguage:user.preferredLanguageName,defaultSelfAvatar:user.avatarUrl||"",lastMessagePreview:""};
-  const activeThread=conversations.find(c=>c.roomId===activeRoomId)||empty;
-  const [profile,setProfile]=useState<UserProfileSettings>({name:user.displayName,email:user.email,language:user.preferredLanguageName,voiceTone:user.voiceTone,translationModel:user.audioModelPreference});
-  const [mixSettings,setMixSettings]=useState({...DEFAULT_MIX,muteOriginal:user.audioMixOriginalMuted});
+  type Thread = ConversationThread & {
+    id?: string;
+    inviteToken?: string;
+    targetUserIds?: string[];
+  };
+  const [conversations, setConversations] = useState<Thread[]>([]);
+  const [activeRoomId, setActiveRoomId] = useState(initialUrl.room);
+  const empty: Thread = {
+    roomId: "",
+    title: "",
+    partnerRoleLabel: "",
+    partnerLocation: "",
+    partnerName: "",
+    partnerLanguage: "",
+    partnerAvatar: "",
+    defaultSelfName: user.displayName,
+    defaultSelfLanguage: user.preferredLanguageName,
+    defaultSelfAvatar: user.avatarUrl || "",
+    lastMessagePreview: "",
+  };
+  const activeThread =
+    conversations.find((c) => c.roomId === activeRoomId) || empty;
+  const [profile, setProfile] = useState<UserProfileSettings>({
+    name: user.displayName,
+    email: user.email,
+    language: user.preferredLanguageName,
+    voiceTone: user.voiceTone,
+    translationModel: user.audioModelPreference,
+  });
+  const [mixSettings, setMixSettings] = useState({
+    ...DEFAULT_MIX,
+    duckLevel: user.audioMixDuckLevel,
+    translatedVolume: user.audioMixTranslatedGain,
+    muteOriginal: user.audioMixOriginalMuted,
+  });
   // Sub-tab inside an open conversation thread (Messages | Meeting Notes)
   const [conversationTab, setConversationTab] =
     useState<ConversationSubTab>("chat");
@@ -117,7 +160,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   // Room real-time state
   const [wsConnected, setWsConnected] = useState(false);
   const [isCustomRoomServer, setIsCustomRoomServer] = useState(
-    Boolean(activeThread.isCustomRoom)
+    Boolean(activeThread.isCustomRoom),
   );
   const [participants, setParticipants] = useState<ParticipantInfo[]>([]);
   const [callPhase, setCallPhase] = useState<CallPhase>("idle");
@@ -142,11 +185,11 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
 
   const notes = allNotesByRoom[activeRoomId] || [];
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(
-    () => (allNotesByRoom[activeRoomId] || [])[0]?.id || null
+    () => (allNotesByRoom[activeRoomId] || [])[0]?.id || null,
   );
   const [isGeneratingNotes, setIsGeneratingNotes] = useState(false);
   const [localizingLanguage, setLocalizingLanguage] = useState<string | null>(
-    null
+    null,
   );
 
   // Voice Note State
@@ -154,34 +197,96 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   const [voiceNoteError, setVoiceNoteError] = useState<string | null>(null);
 
   // Call Log, Personal Tasks & Task Reminders
-  const [callLogs,setCallLogs]=useState<CallLogEntry[]>([]);
-  const [personalTasks,setPersonalTasks]=useState<PersonalTaskItem[]>([]);
-  const [reminders,setReminders]=useState<Record<string,TaskReminder>>({});
-  const [archivedTaskKeys,setArchivedTaskKeys]=useState<string[]>([]);
-  const taskIds=useRef<Record<string,string>>({});
-  const callSession=useRef<string|null>(null);
-  const accepted=useRef(false);
-  const [directory,setDirectory]=useState<{id:string;name:string;language:string}[]>([]);
-  const [notice,setNotice]=useState("");
-  const report=(e:Error)=>setNotice(e.message);
-  const loadWorkspace=useCallback(async()=>{
-    const [threads,notes,rows,logs]:[Thread[],MeetingNoteRecord[],any[],CallLogEntry[]]=await Promise.all([request("/api/conversations"),request("/api/notes"),request("/api/tasks"),request("/api/call-log")]);
-    setConversations(threads);setActiveRoomId(old=>threads.some(t=>t.roomId===old)?old:threads[0]?.roomId||"");setCallLogs(logs);
-    const grouped:Record<string,MeetingNoteRecord[]>={};
-    for(const n of notes)(grouped[n.roomId]??=[]).push(n);
+  const [callLogs, setCallLogs] = useState<CallLogEntry[]>([]);
+  const [personalTasks, setPersonalTasks] = useState<PersonalTaskItem[]>([]);
+  const [reminders, setReminders] = useState<Record<string, TaskReminder>>({});
+  const [archivedTaskKeys, setArchivedTaskKeys] = useState<string[]>([]);
+  const taskIds = useRef<Record<string, string>>({});
+  const callSession = useRef<string | null>(null);
+  const accepted = useRef(false);
+  const [directory, setDirectory] = useState<
+    { id: string; name: string; language: string }[]
+  >([]);
+  const [notice, setNotice] = useState("");
+  const report = (e: Error) => setNotice(e.message);
+  const loadWorkspace = useCallback(async () => {
+    const [threads, notes, rows, logs]: [
+      Thread[],
+      MeetingNoteRecord[],
+      any[],
+      CallLogEntry[],
+    ] = await Promise.all([
+      request("/api/conversations"),
+      request("/api/notes"),
+      request("/api/tasks"),
+      request("/api/call-log"),
+    ]);
+    setConversations(threads);
+    setActiveRoomId((old) =>
+      threads.some((t) => t.roomId === old) ? old : threads[0]?.roomId || "",
+    );
+    setCallLogs(logs);
+    const grouped: Record<string, MeetingNoteRecord[]> = {};
+    for (const n of notes) (grouped[n.roomId] ??= []).push(n);
     setAllNotesByRoom(grouped);
-    const archived:string[]=[],rem:Record<string,TaskReminder>={},ids:Record<string,string>={};
-    for(const t of rows){
-      const n=notes.find(n=>n.id===t.meetingNoteId);
-      const key=n?`note:${n.roomId}:${n.id}:${t.sourceTodoId}`:"personal:"+t.id;
-      ids[key]=t.id;if(t.archived)archived.push(key);if(t.reminderAt)rem[key]={taskKey:key,remindAt:t.reminderAt,label:new Date(t.reminderAt).toLocaleString()};
+    const archived: string[] = [],
+      rem: Record<string, TaskReminder> = {},
+      ids: Record<string, string> = {};
+    for (const t of rows) {
+      const n = notes.find((n) => n.id === t.meetingNoteId);
+      const key = n
+        ? `note:${n.roomId}:${n.id}:${t.sourceTodoId}`
+        : "personal:" + t.id;
+      ids[key] = t.id;
+      if (t.archived) archived.push(key);
+      if (t.reminderAt)
+        rem[key] = {
+          taskKey: key,
+          remindAt: t.reminderAt,
+          label: new Date(t.reminderAt).toLocaleString(),
+        };
     }
-    taskIds.current=ids;setArchivedTaskKeys(archived);setReminders(rem);
-    setPersonalTasks(rows.filter(t=>!t.meetingNoteId).map(t=>({id:t.id,task:t.title,assignee:t.assigneeName||user.displayName,dueHint:t.dueHint||"",completed:t.completed,createdAt:t.createdAt})));
-  },[user.id]);
-  useEffect(()=>{loadWorkspace().catch(report)},[loadWorkspace]);
-  useEffect(()=>{let alive=true;setDirectory([]);if(chatSearch.trim().length<2)return;const timer=setTimeout(()=>request("/api/users/search?q="+encodeURIComponent(chatSearch)).then(rows=>{if(alive)setDirectory(rows)}).catch(report),250);return()=>{alive=false;clearTimeout(timer)}},[chatSearch]);
-  const changeTask=(key:string,patch:object)=>request("/api/tasks/"+taskIds.current[key],"PATCH",patch).then(loadWorkspace).catch(report);
+    taskIds.current = ids;
+    setArchivedTaskKeys(archived);
+    setReminders(rem);
+    setPersonalTasks(
+      rows
+        .filter((t) => !t.meetingNoteId)
+        .map((t) => ({
+          id: t.id,
+          task: t.title,
+          assignee: t.assigneeName || user.displayName,
+          dueHint: t.dueHint || "",
+          completed: t.completed,
+          createdAt: t.createdAt,
+        })),
+    );
+  }, [user.id]);
+  useEffect(() => {
+    loadWorkspace().catch(report);
+  }, [loadWorkspace]);
+  useEffect(() => {
+    let alive = true;
+    setDirectory([]);
+    if (chatSearch.trim().length < 2) return;
+    const timer = setTimeout(
+      () =>
+        request("/api/users/search?q=" + encodeURIComponent(chatSearch))
+          .then((rows) => {
+            if (alive) setDirectory(rows);
+          })
+          .catch(report),
+      250,
+    );
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [chatSearch]);
+  const changeTask = (key: string, patch: object) =>
+    request("/api/tasks/" + taskIds.current[key], "PATCH", patch)
+      .then(loadWorkspace)
+      .catch(report);
   const [levels, setLevels] = useState<AudioMeterLevels>({
     micLevel: 0,
     originalInLevel: 0,
@@ -201,6 +306,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   const transcriptsRef = useRef(transcripts);
   const participantsRef = useRef(participants);
   const activeThreadRef = useRef(activeThread);
+  const requestedNote = useRef<string | null>(null);
   const autoStartCallRoomRef = useRef<string | null>(null);
 
   profileRef.current = profile;
@@ -234,7 +340,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
     const updateElapsed = () => {
       const diff = Math.max(
         0,
-        Math.floor((Date.now() - new Date(callStartedAt).getTime()) / 1000)
+        Math.floor((Date.now() - new Date(callStartedAt).getTime()) / 1000),
       );
       setCallElapsedSeconds(diff);
     };
@@ -244,7 +350,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   }, [callPhase, callStartedAt]);
 
   const stopLocalAudio = useCallback(() => {
-    if(native)void bridge.stopActiveCallForegroundService().catch(()=>{});
+    if (native) void bridge.stopActiveCallForegroundService().catch(() => {});
     if (audioEngineRef.current) {
       audioEngineRef.current.stop();
       audioEngineRef.current = null;
@@ -268,13 +374,13 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         for (const n of incoming) map.set(n.id, n);
         const merged = Array.from(map.values()).sort(
           (a, b) =>
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
         );
 
         return { ...prev, [roomId]: merged };
       });
     },
-    []
+    [],
   );
 
   // Mark a conversation as Recent when messages/calls happen
@@ -289,47 +395,11 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                 lastActivityLabel: "Just now",
                 ...(previewText ? { lastMessagePreview: previewText } : {}),
               }
-            : c
-        )
+            : c,
+        ),
       );
     },
-    []
-  );
-
-  const appendCallLog = useCallback(
-    (params: {
-      roomId: string;
-      title: string;
-      isGroup: boolean;
-      callParticipants: Array<{ name: string; language: string; avatar?: string }>;
-      durationSeconds: number;
-      status: "completed" | "missed" | "cancelled";
-      noteId?: string;
-    }) => {
-      const langs: string[] = [];
-      for (const p of params.callParticipants) {
-        if (
-          p.language &&
-          !langs.some((l) => l.toLowerCase() === p.language.toLowerCase())
-        ) {
-          langs.push(p.language);
-        }
-      }
-      const entry: CallLogEntry = {
-        id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        roomId: params.roomId,
-        title: params.title,
-        isGroup: params.isGroup,
-        participants: params.callParticipants,
-        languages: langs.length > 0 ? langs : [profileRef.current.language],
-        startedAt: new Date().toISOString(),
-        durationSeconds: params.durationSeconds,
-        status: params.status,
-        noteId: params.noteId,
-      };
-      setCallLogs((prev) => [entry, ...prev].slice(0, 60));
-    },
-    []
+    [],
   );
 
   // Connect WebSocket for activeRoomId
@@ -340,13 +410,26 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
     setInterimCaptions({});
     setIsCustomRoomServer(Boolean(activeThreadRef.current.isCustomRoom));
 
-    if(!activeRoomId)return;
-    setWsConnected(false);setMessages([]);setSelectedNoteId(null);
-    const connectSocket=async()=>{
-      if(cancelled)return;
-      let ws:WebSocket;
-      try{ws=await openSocket("/ws/call?roomId="+encodeURIComponent(activeRoomId))}catch{if(!cancelled)reconnectTimerRef.current=window.setTimeout(connectSocket,1800);return}
-      if(cancelled){ws.close();return}
+    if (!activeRoomId) return;
+    setWsConnected(false);
+    setMessages([]);
+    setSelectedNoteId(null);
+    const connectSocket = async () => {
+      if (cancelled) return;
+      let ws: WebSocket;
+      try {
+        ws = await openSocket(
+          "/ws/call?roomId=" + encodeURIComponent(activeRoomId),
+        );
+      } catch {
+        if (!cancelled)
+          reconnectTimerRef.current = window.setTimeout(connectSocket, 1800);
+        return;
+      }
+      if (cancelled) {
+        ws.close();
+        return;
+      }
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -358,12 +441,13 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         if (inCallRef.current) {
           ws.send(
             JSON.stringify({
-              type: "call:join",callSessionId:callSession.current,
+              type: "call:join",
+              callSessionId: callSession.current,
               name: profileRef.current.name,
               language: profileRef.current.language,
               voiceTone: profileRef.current.voiceTone,
               model: profileRef.current.translationModel,
-            })
+            }),
           );
         }
       };
@@ -389,7 +473,11 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
             setTranscripts(snap.transcripts || []);
             mergeRoomNotes(activeRoomId, snap.notes || []);
             if (snap.notes?.length) {
-              setSelectedNoteId(snap.notes[0].id);
+              setSelectedNoteId(
+                snap.notes.find((n) => n.id === requestedNote.current)?.id ||
+                  snap.notes[0].id,
+              );
+              requestedNote.current = null;
             }
             break;
           }
@@ -408,6 +496,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
           }
 
           case "call:ended": {
+            callSession.current=null;accepted.current=false;
             stopLocalAudio();
             setCallPhase("idle");
             setCallerId(null);
@@ -434,7 +523,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
               typeof data.pcm24k === "string"
             ) {
               audioEngineRef.current?.enqueuePartnerTranslatedAudio(
-                data.pcm24k
+                data.pcm24k,
               );
             }
             break;
@@ -454,7 +543,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
           case "call:transcript": {
             const entry: TranscriptEntry = data.entry;
             setTranscripts((prev) =>
-              prev.some((t) => t.id === entry.id) ? prev : [...prev, entry]
+              prev.some((t) => t.id === entry.id) ? prev : [...prev, entry],
             );
             break;
           }
@@ -462,13 +551,13 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
           case "chat:message": {
             const msg: ChatMessage = data.message;
             setMessages((prev) =>
-              prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
+              prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
             );
             promoteToRecent(
               activeRoomId,
               msg.kind === "audio"
                 ? `Voice note (${msg.audio?.translatedLanguage || ""})`
-                : msg.originalText
+                : msg.originalText,
             );
             break;
           }
@@ -482,7 +571,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
               setMessages((prev) =>
                 prev.some((m) => m.id === summaryMsg.id)
                   ? prev
-                  : [...prev, summaryMsg]
+                  : [...prev, summaryMsg],
               );
             }
             break;
@@ -501,7 +590,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                       ...n,
                       localized: { ...n.localized, [language]: localizedNote },
                     }
-                  : n
+                  : n,
               );
 
               return { ...prev, [activeRoomId]: list };
@@ -521,7 +610,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                   updatedLoc[lang] = {
                     ...loc,
                     todos: loc.todos.map((td) =>
-                      td.id === todoId ? { ...td, completed } : td
+                      td.id === todoId ? { ...td, completed } : td,
                     ),
                   };
                 }
@@ -539,7 +628,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
 
           case "call:error": {
             setCallError(
-              data.message || "Live translation encountered an error."
+              data.message || "Live translation encountered an error.",
             );
             break;
           }
@@ -589,14 +678,38 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   }, []);
 
   // Update Profile handler (pushes live to active room WS too!)
-  const handleUpdateProfile=async(patch:Partial<UserProfileSettings>)=>{
-    const next={...profile,...patch};
-    try{
-      await request("/api/me","PATCH",{displayName:next.name,email:next.email,preferredLanguageName:next.language,voiceTone:next.voiceTone,audioModelPreference:next.translationModel});
-      setProfile(next);sendWs({type:"profile:update",name:next.name,language:next.language,voiceTone:next.voiceTone,model:next.translationModel});return true;
-    }catch(e:any){report(e);return false}
+  const handleUpdateProfile = async (patch: Partial<UserProfileSettings>) => {
+    const next = { ...profile, ...patch };
+    try {
+      await request("/api/me", "PATCH", {
+        displayName: next.name,
+        email: next.email,
+        preferredLanguageName: next.language,
+        voiceTone: next.voiceTone,
+        audioModelPreference: next.translationModel,
+      });
+      setProfile(next);
+      sendWs({
+        type: "profile:update",
+        name: next.name,
+        language: next.language,
+        voiceTone: next.voiceTone,
+        model: next.translationModel,
+      });
+      return true;
+    } catch (e: any) {
+      report(e);
+      return false;
+    }
   };
-  const updateMix=(next:AudioMixSettings)=>request("/api/me","PATCH",{audioMixOriginalMuted:next.muteOriginal}).then(()=>setMixSettings(next)).catch(report);
+  const updateMix = (next: AudioMixSettings) =>
+    request("/api/me", "PATCH", {
+      audioMixOriginalMuted: next.muteOriginal,
+      audioMixDuckLevel: next.duckLevel,
+      audioMixTranslatedGain: next.translatedVolume,
+    })
+      .then(() => setMixSettings(next))
+      .catch(report);
   // Start / Accept Call
   const handleStartOrAcceptCall = useCallback(async () => {
     if (inCall || isJoiningCall) return;
@@ -604,9 +717,10 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
     setCallError(null);
 
     try {
-      if(wsRef.current?.readyState!==WebSocket.OPEN)throw Error("Connecting to the conversation. Try again shortly.");
+      if (wsRef.current?.readyState !== WebSocket.OPEN)
+        throw Error("Connecting to the conversation. Try again shortly.");
       const engine = new CallAudioEngine();
-      audioEngineRef.current=engine;
+      audioEngineRef.current = engine;
       engine.setMixSettings(mixSettingsRef.current);
       await engine.start(
         (pcm16k, rms) => {
@@ -614,20 +728,27 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
             sendWs({ type: "audio:chunk", pcm16k, rms });
           }
         },
-        (nextLevels) => setLevels(nextLevels)
+        (nextLevels) => setLevels(nextLevels),
       );
-      if(!accepted.current){
-        const ring=await request("/api/calls/ring","POST",{conversationId:activeThreadRef.current.id});
-        callSession.current=ring.callSessionId;
+      if (!accepted.current) {
+        const ring = await request("/api/calls/ring", "POST", {
+          conversationId: activeThreadRef.current.id,
+        });
+        callSession.current = ring.callSessionId;
       }
-      accepted.current=false;
-      if(native)await bridge.startActiveCallForegroundService({callerName:activeThreadRef.current.title,roomId:activeThreadRef.current.roomId});
+      accepted.current = false;
+      if (native)
+        await bridge.startActiveCallForegroundService({
+          callerName: activeThreadRef.current.title,
+          roomId: activeThreadRef.current.roomId,
+        });
       audioEngineRef.current = engine;
       setInCall(true);
       setMuted(false);
 
       sendWs({
-        type: "call:join",callSessionId:callSession.current,
+        type: "call:join",
+        callSessionId: callSession.current,
         name: profileRef.current.name,
         language: profileRef.current.language,
         voiceTone: profileRef.current.voiceTone,
@@ -635,10 +756,12 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
       });
     } catch (err: any) {
       stopLocalAudio();
+      if(callSession.current)void request("/api/calls/"+callSession.current+"/join-failed","POST",{}).catch(report);
+      accepted.current=false;callSession.current=null;
       setNotice(err?.message || "Could not join call.");
       setCallError(
         err?.message ||
-          "Could not access microphone. Please allow microphone permission to join the live translated call."
+          "Could not access microphone. Please allow microphone permission to join the live translated call.",
       );
     } finally {
       setIsJoiningCall(false);
@@ -649,6 +772,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   useEffect(() => {
     if (
       wsConnected &&
+      wsRef.current?.readyState === WebSocket.OPEN &&
       autoStartCallRoomRef.current &&
       autoStartCallRoomRef.current === activeRoomId
     ) {
@@ -666,7 +790,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
     async (
       durationSec: number,
       callTranscripts: TranscriptEntry[],
-      callSpeakers: Array<{ name: string; language: string }>
+      callSpeakers: Array<{ name: string; language: string }>,
     ): Promise<MeetingNoteRecord | null> => {
       setIsGeneratingNotes(true);
       try {
@@ -697,36 +821,25 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         setIsGeneratingNotes(false);
       }
     },
-    [activeRoomId, mergeRoomNotes]
+    [activeRoomId, mergeRoomNotes],
   );
 
   const handleEndCall = useCallback(async () => {
     const wasActive = callPhaseRef.current === "active";
-    const duration = callStartedAtRef.current
-      ? Math.max(
-          1,
-          Math.floor(
-            (Date.now() - new Date(callStartedAtRef.current).getTime()) / 1000
-          )
-        )
-      : callElapsedSeconds;
-    const savedTranscripts = [...transcriptsRef.current];
-    const activeCallPeople = participantsRef.current.filter((p) => p.inCall);
-    const speakerList =
-      activeCallPeople.length > 0
-        ? activeCallPeople.map((p) => ({ name: p.name, language: p.language }))
-        : [{ name: profileRef.current.name, language: profileRef.current.language }];
-
     stopLocalAudio();
     sendWs({ type: "call:end" });
 
-    if(!wasActive && callSession.current)await request("/api/calls/"+callSession.current+"/cancel","POST",{}).catch(report);
-    callSession.current=null;
+    if (!wasActive && callSession.current)
+      await request(
+        "/api/calls/" + callSession.current + "/cancel",
+        "POST",
+        {},
+      ).catch(report);
+    callSession.current = null;
     loadWorkspace().catch(report);
     promoteToRecent(activeRoomId);
   }, [
     activeRoomId,
-    appendCallLog,
     callElapsedSeconds,
     generateNotesForCall,
     promoteToRecent,
@@ -747,7 +860,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
     (text: string) => {
       sendWs({ type: "transcript:manual", text });
     },
-    [sendWs]
+    [sendWs],
   );
 
   // Send translated text message
@@ -756,8 +869,8 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
       const fallbackTargetLang = activeThread.isCustomRoom
         ? undefined
         : activeThread.partnerName.toLowerCase() === profile.name.toLowerCase()
-        ? activeThread.defaultSelfLanguage
-        : activeThread.partnerLanguage;
+          ? activeThread.defaultSelfLanguage
+          : activeThread.partnerLanguage;
       try {
         const res = await apiFetch("/api/chat/send", {
           method: "POST",
@@ -793,7 +906,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
       profile.name,
       promoteToRecent,
       selfId,
-    ]
+    ],
   );
 
   // Record & send translated voice note
@@ -804,8 +917,8 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
       const fallbackTargetLang = activeThread.isCustomRoom
         ? undefined
         : activeThread.partnerName.toLowerCase() === profile.name.toLowerCase()
-        ? activeThread.defaultSelfLanguage
-        : activeThread.partnerLanguage;
+          ? activeThread.defaultSelfLanguage
+          : activeThread.partnerLanguage;
       try {
         const audioBase64 = await blobToBase64(blob);
         const res = await apiFetch("/api/chat/voice-note", {
@@ -831,7 +944,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         promoteToRecent(activeRoomId, "Voice note");
       } catch (err: any) {
         setVoiceNoteError(
-          err?.message || "Could not process translated voice note."
+          err?.message || "Could not process translated voice note.",
         );
       } finally {
         setIsSendingVoiceNote(false);
@@ -849,11 +962,16 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
       profile.voiceTone,
       promoteToRecent,
       selfId,
-    ]
+    ],
   );
 
   // Toggle To-Do in any room (works from both Meeting Notes AND List bottom tab!)
-  const handleToggleTodoAnyRoom=(room:string,note:string,todo:string,completed:boolean)=>changeTask(`note:${room}:${note}:${todo}`,{completed});
+  const handleToggleTodoAnyRoom = (
+    room: string,
+    note: string,
+    todo: string,
+    completed: boolean,
+  ) => changeTask(`note:${room}:${note}:${todo}`, { completed });
   // Localize a saved note on-demand into any language
   const handleLocalizeNote = useCallback(
     async (note: MeetingNoteRecord, targetLanguage: string) => {
@@ -884,7 +1002,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                       [targetLanguage]: data.localizedNote,
                     },
                   }
-                : n
+                : n,
             );
 
             return { ...prev, [activeRoomId]: list };
@@ -896,7 +1014,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         setLocalizingLanguage(null);
       }
     },
-    [activeRoomId]
+    [activeRoomId],
   );
 
   // Prepare or fetch playable/downloadable WAV audio for a meeting note
@@ -904,7 +1022,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
     async (
       note: MeetingNoteRecord,
       targetLanguage: string,
-      spokenText: string
+      spokenText: string,
     ): Promise<string | null> => {
       try {
         const res = await apiFetch("/api/notes/audio", {
@@ -926,7 +1044,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         const roomKey = note.roomId || activeRoomId;
         setAllNotesByRoom((prev) => {
           const list = (prev[roomKey] || []).map((n) =>
-            n.id === note.id ? { ...n, recordingUrl: url } : n
+            n.id === note.id ? { ...n, recordingUrl: url } : n,
           );
 
           return { ...prev, [roomKey]: list };
@@ -936,7 +1054,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         return null;
       }
     },
-    [activeRoomId]
+    [activeRoomId],
   );
 
   // Select a conversation thread
@@ -949,27 +1067,45 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   };
 
   // Create a new EMPTY custom / multi-participant room
-  async function createThread(body:object){
-    try{const r=await request("/api/conversations","POST",body);await loadWorkspace();setChatSearch("");setActiveRoomId(r.roomKey);setHomeTab("chats");setConversationTab("chat");setMobilePane("thread");setNewRoomInput("");setShowRoomModal(false)}catch(e:any){report(e)}
+  async function createThread(body: object) {
+    try {
+      const r = await request("/api/conversations", "POST", body);
+      await loadWorkspace();
+      setChatSearch("");
+      setActiveRoomId(r.roomKey);
+      setHomeTab("chats");
+      setConversationTab("chat");
+      setMobilePane("thread");
+      setNewRoomInput("");
+      setShowRoomModal(false);
+    } catch (e: any) {
+      report(e);
+    }
   }
-  const handleCreateRoom=(e:FormEvent)=>{e.preventDefault();if(newRoomInput.trim())void createThread({title:newRoomInput.trim()})};
+  const handleCreateRoom = (e: FormEvent) => {
+    e.preventDefault();
+    if (newRoomInput.trim()) void createThread({ title: newRoomInput.trim() });
+  };
   // Derived participant info
-  const selfParticipant: ParticipantInfo =
-    participants.find((p) => p.id === selfId) || {
-      id: selfId,
-      name: profile.name,
-      language: profile.language,
-      connected: wsConnected,
-      inCall,
-      muted,
-      speaking: false,
-      translatorReady: false,
-    };
+  const selfParticipant: ParticipantInfo = participants.find(
+    (p) => p.id === selfId,
+  ) || {
+    id: selfId,
+    name: profile.name,
+    language: profile.language,
+    connected: wsConnected,
+    inCall,
+    muted,
+    speaking: false,
+    translatorReady: false,
+  };
 
   const otherParticipants = participants.filter((p) => p.id !== selfId);
 
-  const inviteUrl=activeThread.inviteToken?webOrigin+"/join/"+activeThread.inviteToken:"";
-  const showCallOverlay=inCall && callPhase!=="idle";
+  const inviteUrl = activeThread.inviteToken
+    ? webOrigin + "/join/" + activeThread.inviteToken
+    : "";
+  const showCallOverlay = inCall && callPhase !== "idle";
   // Filter chats for Search
   const q = chatSearch.trim().toLowerCase();
   const filteredThreads = conversations.filter((t) => {
@@ -992,6 +1128,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   // Open note from Call Log or List tab
   const handleJumpToNote = (roomId: string, noteId?: string) => {
     setActiveRoomId(roomId);
+    requestedNote.current = noteId || null;
     if (noteId) setSelectedNoteId(noteId);
     setHomeTab("chats");
     setConversationTab("notes");
@@ -1012,7 +1149,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
           partnerAvatar: "",
           defaultSelfName: profile.name,
           defaultSelfLanguage: profile.language,
-          defaultSelfAvatar: SELF_AVATAR,
+          defaultSelfAvatar: user.avatarUrl||"",
           lastMessagePreview: "Recent call room",
           isRecent: true,
           isCustomRoom: true,
@@ -1038,7 +1175,10 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         return "Empty room · Share invite to add people";
       }
       const uniqueLangs = Array.from(
-        new Set([profile.language, ...otherParticipants.map((p) => p.language)])
+        new Set([
+          profile.language,
+          ...otherParticipants.map((p) => p.language),
+        ]),
       );
       return `${otherParticipants.length + 1} in room · ${uniqueLangs.join(", ")}`;
     }
@@ -1052,7 +1192,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
   const openTaskCount = (() => {
     const archivedSet = new Set(archivedTaskKeys);
     let count = personalTasks.filter(
-      (t) => !t.completed && !archivedSet.has(`personal:${t.id}`)
+      (t) => !t.completed && !archivedSet.has(`personal:${t.id}`),
     ).length;
     const firstWord = profile.name.toLowerCase().trim().split(/\s+/)[0];
     for (const [roomId, roomNotes] of Object.entries(allNotesByRoom) as Array<
@@ -1080,18 +1220,15 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
     return count;
   })();
 
-  const selfAvatar=user.avatarUrl||"";
-  const selfFirstName =
-    profile.name.trim().split(/\s+/)[0] || "Account";
+  const selfAvatar = user.avatarUrl || "";
+  const selfFirstName = profile.name.trim().split(/\s+/)[0] || "Account";
 
-  const isViewingAsPartner =
-    !activeThread.isCustomRoom &&
-    activeThread.partnerName.toLowerCase() === profile.name.toLowerCase();
+  const isViewingAsPartner = false;
   const threadDisplayTitle = isViewingAsPartner
     ? otherParticipants[0]?.name || activeThread.defaultSelfName
     : activeThread.title;
   const threadDisplayAvatar =
-    getAvatarForName(threadDisplayTitle) ||
+    activeThread.partnerAvatar ||
     (isViewingAsPartner
       ? activeThread.defaultSelfAvatar
       : activeThread.partnerAvatar);
@@ -1167,7 +1304,15 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         </div>
 
         {/* Create New Multi-Participant Room Form */}
-        {directory.map(person=><button className="text-left w-full px-5 py-2 hover:bg-blue-50" key={person.id} onClick={()=>createThread({targetUserIds:[person.id]})}>{person.name} · {person.language}</button>)}
+        {directory.map((person) => (
+          <button
+            className="text-left w-full px-5 py-2 hover:bg-blue-50"
+            key={person.id}
+            onClick={() => createThread({ targetUserIds: [person.id] })}
+          >
+            {person.name} · {person.language}
+          </button>
+        ))}
         {showRoomModal && (
           <form
             onSubmit={handleCreateRoom}
@@ -1186,7 +1331,8 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
               </button>
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Creates an empty room where 2+ people from different languages can join via invite link.
+              Creates an empty room where 2+ people from different languages can
+              join via invite link.
             </p>
             <input
               type="text"
@@ -1391,11 +1537,21 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
             reminders={reminders}
             archivedKeys={archivedTaskKeys}
             onToggleNoteTodo={handleToggleTodoAnyRoom}
-            onAddPersonalTask={title=>void request("/api/tasks","POST",{title}).then(loadWorkspace).catch(report)}
-            onTogglePersonalTask={id=>void changeTask("personal:"+id,{completed:!personalTasks.find(t=>t.id===id)?.completed})}
-            onSetReminder={(key,r)=>void changeTask(key,{reminderAt:r?.remindAt||null})}
-            onArchiveTask={key=>void changeTask(key,{archived:true})}
-            onUnarchiveTask={key=>void changeTask(key,{archived:false})}
+            onAddPersonalTask={(title) =>
+              void request("/api/tasks", "POST", { title })
+                .then(loadWorkspace)
+                .catch(report)
+            }
+            onTogglePersonalTask={(id) =>
+              void changeTask("personal:" + id, {
+                completed: !personalTasks.find((t) => t.id === id)?.completed,
+              })
+            }
+            onSetReminder={(key, r) =>
+              void changeTask(key, { reminderAt: r?.remindAt || null })
+            }
+            onArchiveTask={(key) => void changeTask(key, { archived: true })}
+            onUnarchiveTask={(key) => void changeTask(key, { archived: false })}
             onOpenNote={handleJumpToNote}
           />
         )}
@@ -1408,12 +1564,20 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
             darkMode={darkMode}
             onUpdateProfile={handleUpdateProfile}
             onUpdateMix={updateMix}
-            onToggleDarkMode={v=>request("/api/me","PATCH",{theme:v?"dark":"light"}).then(()=>setDarkMode(v)).catch(report)}
-            onResetSession={()=>void signOut().catch(report)}
+            onToggleDarkMode={(v) =>
+              request("/api/me", "PATCH", { theme: v ? "dark" : "light" })
+                .then(() => setDarkMode(v))
+                .catch(report)
+            }
+            onResetSession={() => void signOut().catch(report)}
           />
         )}
 
-        {homeTab==="chats" && !activeRoomId && <div className="m-auto p-8 text-slate-600">Search for a contact or create a room to start a conversation.</div>}
+        {homeTab === "chats" && !activeRoomId && (
+          <div className="m-auto p-8 text-slate-600">
+            Search for a contact or create a room to start a conversation.
+          </div>
+        )}
         {homeTab === "chats" && activeRoomId && (
           <>
             {/* Top Conversation Header */}
@@ -1479,7 +1643,8 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                   >
                     <FileText className="w-3.5 h-3.5" />
                     <span>
-                      Meeting Notes{notes.length > 0 ? ` (${notes.length})` : ""}
+                      Meeting Notes
+                      {notes.length > 0 ? ` (${notes.length})` : ""}
                     </span>
                   </button>
                 </nav>
@@ -1530,7 +1695,8 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                   >
                     <FileText className="w-3.5 h-3.5" />
                     <span>
-                      Meeting Notes{notes.length > 0 ? ` (${notes.length})` : ""}
+                      Meeting Notes
+                      {notes.length > 0 ? ` (${notes.length})` : ""}
                     </span>
                   </button>
                 </div>
@@ -1540,7 +1706,9 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
             {conversationTab === "chat" && (
               <ChatPanel
                 selfId={selfId}
-                isCustomRoom={isCustomRoomServer || Boolean(activeThread.isCustomRoom)}
+                isCustomRoom={
+                  isCustomRoomServer || Boolean(activeThread.isCustomRoom)
+                }
                 roomTitle={activeThread.title}
                 selfParticipant={selfParticipant}
                 otherParticipants={otherParticipants}
@@ -1578,7 +1746,12 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                 localizingLanguage={localizingLanguage}
                 onSelectNote={(id) => setSelectedNoteId(id)}
                 onToggleTodo={(noteId, todoId, completed) =>
-                  handleToggleTodoAnyRoom(activeRoomId, noteId, todoId, completed)
+                  handleToggleTodoAnyRoom(
+                    activeRoomId,
+                    noteId,
+                    todoId,
+                    completed,
+                  )
                 }
                 onLocalizeNote={handleLocalizeNote}
                 onPrepareNoteAudio={handlePrepareNoteAudio}
@@ -1591,7 +1764,7 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
                           name: p.name,
                           language: p.language,
                         }))
-                      : [{ name: profile.name, language: profile.language }]
+                      : [{ name: profile.name, language: profile.language }],
                   )
                 }
                 onStartCall={handleStartOrAcceptCall}
@@ -1602,16 +1775,62 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
       </main>
 
       {/* ===================================================================== */}
-      {notice&&<div role="alert" className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[110] rounded-lg bg-slate-900 text-white p-3">{notice} <button onClick={()=>setNotice("")}>Dismiss</button></div>}
-      <IncomingCalls language={profile.language} onError={setNotice} onAnswer={async r=>{
-        try{await loadWorkspace();accepted.current=true;callSession.current=r.callSessionId;setMobilePane("thread");setHomeTab("chats");
-        if(activeRoomId===r.roomKey && wsConnected)await handleStartOrAcceptCall();
-        else {autoStartCallRoomRef.current=r.roomKey;setActiveRoomId(r.roomKey)}
-        }catch(e:any){report(e)}
-      }} onEvent={e=>{
-        if(e.type==="workspace:changed"){void loadWorkspace().catch(report);return}
-        if(e.callSessionId===callSession.current && !e.partial && ["call:declined","call:cancelled","call:missed"].includes(e.type)){sendWs({type:"call:leave"});stopLocalAudio();callSession.current=null;setCallPhase("idle");void loadWorkspace().catch(report)}
-      }}/>
+      {notice && (
+        <div
+          role="alert"
+          className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[110] rounded-lg bg-slate-900 text-white p-3"
+        >
+          {notice} <button onClick={() => setNotice("")}>Dismiss</button>
+        </div>
+      )}
+      <IncomingCalls
+        language={profile.language}
+        onError={setNotice}
+        onAnswer={async (r) => {
+          try {
+            await loadWorkspace();
+            accepted.current = true;
+            callSession.current = r.callSessionId;
+            setMobilePane("thread");
+            setHomeTab("chats");
+            if (activeRoomId === r.roomKey && wsConnected)
+              await handleStartOrAcceptCall();
+            else {
+              autoStartCallRoomRef.current = r.roomKey;
+              setActiveRoomId(r.roomKey);
+            }
+          } catch (e: any) {
+            report(e);
+          }
+        }}
+        onEvent={(e) => {
+          if (e.type === "conversation:changed") {
+            void request("/api/conversations")
+              .then(setConversations)
+              .catch(report);
+            return;
+          }
+          if (e.type === "workspace:changed") {
+            void loadWorkspace().catch(report);
+            if (e.roomId === activeRoomId)
+              void request("/api/conversations/" + activeRoomId + "/messages")
+                .then(setMessages)
+                .catch(report);
+            return;
+          }
+          if (
+            e.callSessionId === callSession.current &&
+            !e.partial &&
+            ["call:declined", "call:cancelled", "call:missed"].includes(e.type)
+          ) {
+            sendWs({ type: "call:leave" });
+            stopLocalAudio();
+            callSession.current = null;
+            setCallPhase("idle");
+            void loadWorkspace().catch(report);
+          }
+        }}
+      />
       {/* MOBILE BOTTOM 4-TAB NAVIGATION (Chats | Calls | List | First Name)    */}
       {/* Shown on all top-level views on mobile; hidden inside open chat thread */}
       {/* ===================================================================== */}
@@ -1673,7 +1892,9 @@ export default function App({user,signOut}:{user:SahvaUser;signOut:()=>Promise<v
         <CallOverlay
           roomId={activeRoomId}
           roomTitle={threadDisplayTitle}
-          isCustomRoom={isCustomRoomServer || Boolean(activeThread.isCustomRoom)}
+          isCustomRoom={
+            isCustomRoomServer || Boolean(activeThread.isCustomRoom)
+          }
           selfId={selfId}
           callPhase={callPhase}
           callerId={callerId}
