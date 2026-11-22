@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql, gt, ilike, inArray, ne, or } from "drizzle-orm";
@@ -23,7 +25,7 @@ import {
   noteList,
   threadList,
 } from "./services/repository";
-import { uploadMedia, mediaUrl } from "./services/s3";
+import { uploadMedia, mediaUrl, readMedia } from "./services/s3";
 import { sendUser } from './services/callSignaling';
 export const api = Router();
 export async function createRoom(owner: string, ids: string[], title?: string) {
@@ -430,6 +432,30 @@ api.get(
           Object.values(row.m.translatedAudioMapJson).includes(key));
     }
     if (!allowed) throw new HttpError(404, "Media unavailable.");
+    if (req.query.format === "audio") {
+      if (prefix === "avatars") throw new HttpError(404, "Audio unavailable.");
+      const range = req.get("range");
+      if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range)) throw new HttpError(416, "Unsupported byte range.");
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      res.on("close", abort);
+      try {
+        const file = await readMedia(key, range, controller.signal);
+        if (!(file.Body instanceof Readable)) throw new HttpError(502, "Audio could not be opened.");
+        res.status(file.ContentRange ? 206 : 200);
+        res.set({ "Content-Type": file.ContentType || "application/octet-stream", "Accept-Ranges": "bytes",
+          "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
+        if (file.ContentRange) res.set("Content-Range", file.ContentRange);
+        if (file.ContentLength !== undefined) res.set("Content-Length", String(file.ContentLength));
+        await pipeline(file.Body, res);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof Error && error.name === "NoSuchKey") throw new HttpError(404, "Audio file unavailable.");
+        if (error instanceof Error && error.name === "InvalidRange") throw new HttpError(416, "Unsupported byte range.");
+        throw error;
+      } finally { res.off("close", abort); }
+      return;
+    }
     const url = await mediaUrl(key, req.query.download === "1");
     res.set("Cache-Control", "no-store");
     if (req.query.format === "json") res.json({ url });

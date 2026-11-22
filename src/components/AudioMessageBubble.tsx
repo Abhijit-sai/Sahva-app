@@ -1,6 +1,6 @@
-import {request} from "../lib/runtimeConfig";
+import { apiFetch } from "../lib/runtimeConfig";
 import { useState, useRef, useEffect } from "react";
-import { Play, Pause, FileText, Volume2 } from "lucide-react";
+import { Play, Pause, FileText, Volume2, Loader2 } from "lucide-react";
 import { areSameLanguage } from "../data/languages";
 import type { ChatMessage } from "../types";
 
@@ -25,7 +25,7 @@ function InlineClipPlayer({
   accent,
 }: {
   src: string;
-  mediaKey?:string;
+  mediaKey?: string;
   label: string;
   fallbackDuration: number;
   accent: "blue" | "slate";
@@ -35,60 +35,83 @@ function InlineClipPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(fallbackDuration || 0);
 
+  const clip = useRef<string | undefined>(undefined);
+  const pending = useRef<AbortController | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
   useEffect(() => {
     const el = audioRef.current;
-    if (!el) return;
-
-    const onLoaded = () => {
-      if (Number.isFinite(el.duration) && el.duration > 0) {
-        setDuration(el.duration);
-      }
-    };
-    const onTime = () => setCurrentTime(el.currentTime);
-    const onEnded = () => {
-      setPlaying(false);
-      setCurrentTime(0);
-    };
-    const onPause = () => setPlaying(false);
-    const onPlay = () => setPlaying(true);
-
-    el.addEventListener("loadedmetadata", onLoaded);
-    el.addEventListener("timeupdate", onTime);
-    el.addEventListener("ended", onEnded);
-    el.addEventListener("pause", onPause);
-    el.addEventListener("play", onPlay);
+    setLoading(false);
+    setError("");
+    setPlaying(false);
+    setCurrentTime(0);
+    setDuration(fallbackDuration || 0);
     return () => {
-      el.removeEventListener("loadedmetadata", onLoaded);
-      el.removeEventListener("timeupdate", onTime);
-      el.removeEventListener("ended", onEnded);
-      el.removeEventListener("pause", onPause);
-      el.removeEventListener("play", onPlay);
+      pending.current?.abort();
+      pending.current = null;
+      el?.pause();
+      el?.removeAttribute("src");
+      el?.load();
+      if (clip.current) URL.revokeObjectURL(clip.current);
+      clip.current = undefined;
     };
-  }, [src]);
+  }, [mediaKey || src, fallbackDuration]);
 
-  const togglePlay = () => {
+  async function togglePlay() {
     const el = audioRef.current;
-    if (!el) return;
-    if (playing) {
-      el.pause();
-    } else {
-      el.play().catch(async()=>{
-        if(!mediaKey)return;
-        const {url}=await request("/api/media/"+mediaKey+"?format=json");
-        el.src=url;await el.play();
-      }).catch(()=>setPlaying(false));
+    if (!el || pending.current) return;
+    if (!el.paused) { el.pause(); return; }
+    const controller = new AbortController();
+    pending.current = controller;
+    setLoading(true);
+    setError("");
+    try {
+      if (mediaKey && !clip.current) {
+        const path = mediaKey.split("/").map(encodeURIComponent).join("/");
+        const response = await apiFetch("/api/media/" + path + "?format=audio", { signal: controller.signal });
+        if (!response.ok) throw Error(response.status === 404
+          ? "This audio file is unavailable." : "Could not load this audio. Tap Play to retry.");
+        const blob = await response.blob();
+        if (controller.signal.aborted) return;
+        clip.current = URL.createObjectURL(blob);
+      }
+      const url = clip.current || src;
+      if (el.src !== url) el.src = url;
+      await el.play();
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        if (clip.current) URL.revokeObjectURL(clip.current);
+        clip.current = undefined;
+        setError(e instanceof DOMException ? "Playback could not start. Tap Play to retry." :
+          e instanceof Error ? e.message : "Could not play this audio.");
+      }
+    } finally {
+      if (pending.current === controller) {
+        pending.current = null;
+        setLoading(false);
+      }
     }
-  };
+  }
 
   const progress =
     duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (
     <div className="flex items-center gap-2.5 min-w-[215px] sm:min-w-[250px]">
-      <audio ref={audioRef} src={src} preload="metadata" />
+      <audio ref={audioRef} preload="none"
+        onLoadedMetadata={e => { if (Number.isFinite(e.currentTarget.duration)) setDuration(e.currentTarget.duration); }}
+        onTimeUpdate={e => setCurrentTime(e.currentTarget.currentTime)}
+        onPlaying={() => { setPlaying(true); setError(""); }}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurrentTime(0); }}
+        onError={e => { if (e.currentTarget.getAttribute("src")) { setPlaying(false); setError("Could not play this audio. Tap Play to retry."); } }}
+      />
       <button
         type="button"
         onClick={togglePlay}
+        disabled={loading}
+        aria-busy={loading}
         aria-label={playing ? `Pause ${label}` : `Play ${label}`}
         className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors text-white ${
           accent === "blue"
@@ -96,7 +119,7 @@ function InlineClipPlayer({
             : "bg-slate-600 hover:bg-slate-700 dark:bg-slate-600 dark:hover:bg-slate-500"
         }`}
       >
-        {playing ? (
+        {loading ? <Loader2 aria-hidden="true" className="w-4 h-4 animate-spin" /> : playing ? (
           <Pause className="w-4 h-4 fill-current" />
         ) : (
           <Play className="w-4 h-4 fill-current ml-0.5" />
@@ -115,7 +138,7 @@ function InlineClipPlayer({
         <div
           onClick={(e) => {
             const el = audioRef.current;
-            if (!el || !duration) return;
+            if (!el?.currentSrc || !duration) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const ratio = Math.max(
               0,
@@ -139,6 +162,7 @@ function InlineClipPlayer({
             style={{ width: `${progress}%` }}
           />
         </div>
+        {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
       </div>
     </div>
   );
@@ -150,7 +174,7 @@ export default function AudioMessageBubble({
   viewerLanguage,
 }: AudioMessageBubbleProps) {
   const [showTranscription, setShowTranscription] = useState(false);
-  const [showOriginalAudio, setShowOriginalAudio] = useState(false);
+  const [showOriginalAudio, setShowOriginalAudio] = useState(true);
 
   const audio = message.audio;
   if (!audio) return null;

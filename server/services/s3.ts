@@ -26,6 +26,9 @@ export async function uploadMedia(
   );
   return key;
 }
+export function readMedia(key: string, range?: string, signal?: AbortSignal) {
+  return client.send(new GetObjectCommand({ Bucket: bucket(), Key: key, Range: range }), { abortSignal: signal });
+}
 export function mediaUrl(key: string, download = false) {
   return getSignedUrl(
     client,
